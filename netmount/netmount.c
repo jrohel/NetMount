@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2024 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2024-2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
@@ -41,10 +41,12 @@
 
 #define MAX_DRIVERS_COUNT 26
 struct shared_data {
-    uint8_t ldrv[MAX_DRIVERS_COUNT];        // local to remote drives mappings (0=A, 1=B, 2=C, ...);
-                                            // must be first in structure, used in assembler
-    uint8_t remote_ips[MAX_DRIVERS_COUNT];  // index of ip in ip_mac_map table
-    uint16_t remote_ports[MAX_DRIVERS_COUNT];
+    uint8_t ldrv[MAX_DRIVERS_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
+                                      // must be first in structure, used in assembler
+    struct drive_info {
+        uint8_t remote_ip_idx;  // index of ip in ip_mac_map table
+        uint16_t remote_port;
+    } drives[MAX_DRIVERS_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
     uint16_t local_port;
@@ -545,10 +547,11 @@ static uint16_t send_request(
     struct ether_frame * const frame = getptr_global_send_buff();
 
     // Fill (ethernet) mac destination addres. Source mac address and ethertype was filled during initialization.
-    frame->mac.dest_hw_addr = getptr_shared_data()->ip_mac_map[getptr_shared_data()->remote_ips[local_drive]].mac_addr;
+    frame->mac.dest_hw_addr =
+        getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx].mac_addr;
 
     const union ipv4_addr remote_ip =
-        getptr_shared_data()->ip_mac_map[getptr_shared_data()->remote_ips[local_drive]].ip;
+        getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx].ip;
     create_ip(
         &frame->ipv4,
         remote_ip,
@@ -558,9 +561,9 @@ static uint16_t send_request(
     create_udp(
         &frame->udp,
         getptr_shared_data()->local_port,
-        getptr_shared_data()->remote_ports[local_drive],
+        getptr_shared_data()->drives[local_drive].remote_port,
         sizeof(struct drive_proto_hdr) + request_data_len);
-    getptr_shared_data()->last_remote_udp_port = getptr_shared_data()->remote_ports[local_drive];
+    getptr_shared_data()->last_remote_udp_port = getptr_shared_data()->drives[local_drive].remote_port;
 
 
     struct drive_proto_hdr * const snd_drive_proto = (struct drive_proto_hdr *)frame->udp_data;
@@ -1723,7 +1726,7 @@ static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data
                 }
 
                 uint8_t driver_id = 0;  // skip, used by mounted drive
-                while (driver_id < MAX_DRIVERS_COUNT && shared_data_ptr->remote_ips[driver_id] != i) {
+                while (driver_id < MAX_DRIVERS_COUNT && shared_data_ptr->drives[driver_id].remote_ip_idx != i) {
                     ++driver_id;
                 }
 
@@ -1928,7 +1931,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     cds->flags = 0;
 
     shared_data_ptr->ldrv[drive_no] = 0xFFU;
-    shared_data_ptr->remote_ips[drive_no] = 0xFFU;
+    shared_data_ptr->drives[drive_no].remote_ip_idx = 0xFFU;
     return 0;
 }
 
@@ -2213,8 +2216,8 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_FREE_SLOT_FOR_REMOTE_IP;
         }
 
-        shared_data_ptr->remote_ips[drive_no] = remote_ip_idx;
-        shared_data_ptr->remote_ports[drive_no] = remote_port;
+        shared_data_ptr->drives[drive_no].remote_ip_idx = remote_ip_idx;
+        shared_data_ptr->drives[drive_no].remote_port = remote_port;
         shared_data_ptr->ldrv[drive_no] = remote_drive_no;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
