@@ -1954,44 +1954,44 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
 
 
 static void print_help(void) {
-    my_print_dos_string("NetMount " PROGRAM_VERSION ", Copyright 2024 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n$");
-    my_print_dos_string(
-        "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
-        "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n\r\n$");
-
-    my_print_dos_string(
-        "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
-        "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n\r\n$");
-    my_print_dos_string(
-        "NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]\r\n"
-        "         [/MAX_RETRIES:<count>]\r\n"
-        "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
-        "         <local_drive_letter>\r\n\r\n$");
-    my_print_dos_string("NETMOUNT UMOUNT <local_drive_letter>\r\n\r\n$");
-    my_print_dos_string("NETMOUNT UMOUNT /ALL\r\n\r\n$");
-
-    my_print_dos_string("Commands:\r\n$");
-    my_print_dos_string("INSTALL                   Installs NetMount as resident (TSR)\r\n$");
-    my_print_dos_string("MOUNT                     Mounts remote drive as local drive\r\n$");
-    my_print_dos_string("UMOUNT                    Unmounts local drive(s) from remote drive\r\n\r\n$");
-
-    my_print_dos_string("Arguments:\r\n$");
-    my_print_dos_string("/IP:<local_ipv4_addr>     Sets local IP address\r\n$");
-    my_print_dos_string("/PORT:<local_udp_port>    Sets local UDP port. 12200 by default\r\n$");
-    my_print_dos_string(
-        "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
-        "                          First found in range 0x60 - 0x80 by default.\r\n$");
-    my_print_dos_string("/MASK:<net_mask>          Sets network mask\r\n$");
-    my_print_dos_string("/GW:<gateway_addr>        Sets gateway address\r\n$");
-    my_print_dos_string("<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n$");
-    my_print_dos_string("<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n$");
-    my_print_dos_string("/ALL                      Unmount all drives\r\n$");
-    my_print_dos_string("<remote_ipv4_addr>        Specifies IP address of remote server\r\n$");
-    my_print_dos_string("<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n$");
-    my_print_dos_string("/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n$");
-    my_print_dos_string("/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n$");
-    my_print_dos_string("/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)\r\n$");
-    my_print_dos_string("/?                        Display this help\r\n$");
+    my_print_dos_string("NetMount " PROGRAM_VERSION
+                        ", Copyright 2024-2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
+                        "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
+                        "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n"
+                        "\r\n"
+                        "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
+                        "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n"
+                        "\r\n"
+                        "NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]\r\n"
+                        "         [/MAX_RETRIES:<count>]\r\n"
+                        "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
+                        "         <local_drive_letter>\r\n"
+                        "\r\n"
+                        "NETMOUNT UMOUNT <local_drive_letter>\r\n"
+                        "\r\n"
+                        "NETMOUNT UMOUNT /ALL\r\n"
+                        "\r\n"
+                        "Commands:\r\n"
+                        "INSTALL                   Installs NetMount as resident (TSR)\r\n"
+                        "MOUNT                     Mounts remote drive as local drive\r\n"
+                        "UMOUNT                    Unmounts local drive(s) from remote drive\r\n"
+                        "\r\n"
+                        "Arguments:\r\n"
+                        "/IP:<local_ipv4_addr>     Sets local IP address\r\n"
+                        "/PORT:<local_udp_port>    Sets local UDP port. 12200 by default\r\n"
+                        "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
+                        "                          First found in range 0x60 - 0x80 by default.\r\n"
+                        "/MASK:<net_mask>          Sets network mask\r\n"
+                        "/GW:<gateway_addr>        Sets gateway address\r\n"
+                        "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
+                        "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
+                        "/ALL                      Unmount all drives\r\n"
+                        "<remote_ipv4_addr>        Specifies IP address of remote server\r\n"
+                        "<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n"
+                        "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n"
+                        "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n"
+                        "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)\r\n"
+                        "/?                        Display this help\r\n$");
 }
 
 
