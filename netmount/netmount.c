@@ -15,11 +15,11 @@
 #define PROGRAM_VERSION "1.0.0"
 
 // Program parameters
-#define ENABLE_DRIVE_PROTO_CHECKSUM   1
-#define DEFAULT_MIN_RCV_TMO_SECONDS   1  // If it is changed, adjust the help
-#define DEFAULT_MAX_RCV_TMO_SECONDS   5  // If it is changed, adjust the help
-#define MAX_NUMBER_FRAME_SEND_RETRIES 4
-#define MAX_FRAMESIZE                 1200
+#define ENABLE_DRIVE_PROTO_CHECKSUM     1
+#define DEFAULT_MIN_RCV_TMO_SECONDS     1  // If it is changed, adjust the help
+#define DEFAULT_MAX_RCV_TMO_SECONDS     5  // If it is changed, adjust the help
+#define DEFAULT_MAX_NUM_REQUEST_RETRIES 4  // If it is changed, adjust the help
+#define MAX_FRAMESIZE                   1200
 
 
 #define MY_STACK_SIZE 1024
@@ -50,6 +50,7 @@ struct shared_data {
         uint16_t remote_port;
         uint8_t min_rcv_tmo_18_2_ticks_shr_2;  // Minimum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
+        uint8_t max_request_retries;           // Maximum number of request retries
     } drives[MAX_DRIVERS_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
@@ -72,7 +73,7 @@ struct shared_data {
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
 };
 
-#define SHARED_DATA_SIZE 226  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 252  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -594,14 +595,17 @@ static uint16_t send_request(
     uint16_t rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].min_rcv_tmo_18_2_ticks_shr_2 << 2;
     const uint16_t max_rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].max_rcv_tmo_18_2_ticks_shr_2 << 2;
 
+    // maximum configured request retries for the processed drive
+    const uint8_t max_request_retries = getptr_shared_data()->drives[local_drive].max_request_retries;
+
     // lowest 16 bits of timer. Warning: this location won't increment while interrupts are disabled!
     volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
 
-    // Send the request and wait for a response for the minimum configured timeout. If no response is received,
-    // send the request again and again, up to MAX_NUMBER_FRAME_SEND_RETRIES times.
+    // Send the request and wait for a response for the minimum configured timeout.
+    // If no response is received, send the request again and again, up to configured maximum.
     // The timeout is doubled on each retry up to the maximum configured timeout.
     // The clock at address 0x46C is used as the time reference. The default frequency is 18.2 Hz.
-    for (int retries = 1; retries <= MAX_NUMBER_FRAME_SEND_RETRIES; ++retries) {
+    for (int retries = 0; retries <= max_request_retries; ++retries) {
         send_frame(frame_length, frame);
 
         // wait for (and validate) the answer frame
@@ -1960,6 +1964,7 @@ static void print_help(void) {
         "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n\r\n$");
     my_print_dos_string(
         "NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]\r\n"
+        "         [/MAX_RETRIES:<count>]\r\n"
         "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
         "         <local_drive_letter>\r\n\r\n$");
     my_print_dos_string("NETMOUNT UMOUNT <local_drive_letter>\r\n\r\n$");
@@ -1985,6 +1990,7 @@ static void print_help(void) {
     my_print_dos_string("<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n$");
     my_print_dos_string("/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n$");
     my_print_dos_string("/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n$");
+    my_print_dos_string("/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)\r\n$");
     my_print_dos_string("/?                        Display this help\r\n$");
 }
 
@@ -2185,6 +2191,7 @@ int main(int argc, char * argv[]) {
         uint8_t drive_no;
         uint16_t min_rcv_tmo_sec = DEFAULT_MIN_RCV_TMO_SECONDS;
         uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SECONDS;
+        uint8_t max_request_retries = DEFAULT_MAX_NUM_REQUEST_RETRIES;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
                 // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
@@ -2228,6 +2235,11 @@ int main(int argc, char * argv[]) {
                 max_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
                 continue;
             }
+            if (strn_upper_cmp(argv[i] + 1, "MAX_RETRIES:", 12) == 0) {
+                const char * endptr;
+                max_request_retries = strto_ui16(argv[i] + 13, &endptr);
+                continue;
+            }
             my_print_dos_string("Error: Unknown argument: $");
             my_print_string(argv[i]);
             my_print_dos_string("\r\n$");
@@ -2268,6 +2280,8 @@ int main(int argc, char * argv[]) {
         // Convert timeouts to 18.2 Hz ticks (2 least significant bits ignored). Uses only integer operations.
         shared_data_ptr->drives[drive_no].min_rcv_tmo_18_2_ticks_shr_2 = ((min_rcv_tmo_sec * 182) / 10) >> 2;
         shared_data_ptr->drives[drive_no].max_rcv_tmo_18_2_ticks_shr_2 = ((max_rcv_tmo_sec * 182) / 10) >> 2;
+
+        shared_data_ptr->drives[drive_no].max_request_retries = max_request_retries;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)

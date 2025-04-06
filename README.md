@@ -21,6 +21,7 @@ NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
          [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]
 
 NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]
+         [/MAX_RETRIES:<count>]
          <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
          <local_drive_letter>
 
@@ -47,6 +48,7 @@ Arguments:
 <remote_udp_port>         Specifies remote UDP port. 12200 by default
 /MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)
 /MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)
+/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)
 /?                        Display this help
 ```
 
