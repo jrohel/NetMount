@@ -16,6 +16,8 @@
 
 // Program parameters
 #define ENABLE_DRIVE_PROTO_CHECKSUM   1
+#define DEFAULT_MIN_RCV_TMO_SECONDS   1  // If it is changed, adjust the help
+#define DEFAULT_MAX_RCV_TMO_SECONDS   5  // If it is changed, adjust the help
 #define MAX_NUMBER_FRAME_SEND_RETRIES 4
 #define MAX_FRAMESIZE                 1200
 
@@ -46,6 +48,8 @@ struct shared_data {
     struct drive_info {
         uint8_t remote_ip_idx;  // index of ip in ip_mac_map table
         uint16_t remote_port;
+        uint8_t min_rcv_tmo_18_2_ticks_shr_2;  // Minimum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
+        uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
     } drives[MAX_DRIVERS_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
@@ -68,7 +72,7 @@ struct shared_data {
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
 };
 
-#define SHARED_DATA_SIZE 174  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 226  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -585,22 +589,31 @@ static uint16_t send_request(
     getptr_shared_data()->server_response_received = 0;
 
     volatile int16_t * const recvrequest_data_len_ptr = getptr_global_recv_data_len();
-    // Send the function frame and wait about 55ms - 110ms for response. Then, resend
-    // the function again and again, up to MAX_NUMBER_FRAME_SEND_RETRIES times.
-    // The timeout is increased by 1 tick (55ms) for each retry.
-    // The clock at 0x46C address is used as a timing reference. The default frequncy is 18.2Hz.
+
+    // minimum and maximum configured timeout for the processed drive
+    uint16_t rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].min_rcv_tmo_18_2_ticks_shr_2 << 2;
+    const uint16_t max_rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].max_rcv_tmo_18_2_ticks_shr_2 << 2;
+
+    // lowest 16 bits of timer. Warning: this location won't increment while interrupts are disabled!
+    volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
+
+    // Send the request and wait for a response for the minimum configured timeout. If no response is received,
+    // send the request again and again, up to MAX_NUMBER_FRAME_SEND_RETRIES times.
+    // The timeout is doubled on each retry up to the maximum configured timeout.
+    // The clock at address 0x46C is used as the time reference. The default frequency is 18.2 Hz.
     for (int retries = 1; retries <= MAX_NUMBER_FRAME_SEND_RETRIES; ++retries) {
         send_frame(frame_length, frame);
 
         // wait for (and validate) the answer frame
         const struct drive_proto_hdr * const rcv_drive_proto =
             (struct drive_proto_hdr *)((struct ether_frame *)global_recv_buff)->udp_data;
-        volatile uint8_t __far * const time =
-            (uint8_t __far *)0x46C;  // lowest 8 bits of timer. Warning: this location won't increment while interrupts are disabled!
-
-        for (const uint8_t rcv_start_time = *time;;) {
-            if (*time - rcv_start_time > retries) {
-                // timeout
+        for (const uint16_t rcv_start_time = *time;;) {
+            if (*time - rcv_start_time > rcv_tmo_18_2_ticks) {
+                // timeout, extend the timeout *2, but do not exceed the configured maximum
+                rcv_tmo_18_2_ticks <<= 1;
+                if (rcv_tmo_18_2_ticks > max_rcv_tmo_18_2_ticks) {
+                    rcv_tmo_18_2_ticks = max_rcv_tmo_18_2_ticks;
+                }
                 break;
             }
 
@@ -1946,30 +1959,33 @@ static void print_help(void) {
         "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
         "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n\r\n$");
     my_print_dos_string(
-        "NETMOUNT MOUNT <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
+        "NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]\r\n"
+        "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
         "         <local_drive_letter>\r\n\r\n$");
     my_print_dos_string("NETMOUNT UMOUNT <local_drive_letter>\r\n\r\n$");
     my_print_dos_string("NETMOUNT UMOUNT /ALL\r\n\r\n$");
 
     my_print_dos_string("Commands:\r\n$");
-    my_print_dos_string("INSTALL                      Installs NetMount as resident (TSR)\r\n$");
-    my_print_dos_string("MOUNT                        Mounts remote drive as local drive\r\n$");
-    my_print_dos_string("UMOUNT                       Unmounts local drive(s) from remote drive\r\n\r\n$");
+    my_print_dos_string("INSTALL                   Installs NetMount as resident (TSR)\r\n$");
+    my_print_dos_string("MOUNT                     Mounts remote drive as local drive\r\n$");
+    my_print_dos_string("UMOUNT                    Unmounts local drive(s) from remote drive\r\n\r\n$");
 
     my_print_dos_string("Arguments:\r\n$");
-    my_print_dos_string("/IP:<local_ipv4_addr>        Sets local IP address\r\n$");
-    my_print_dos_string("/PORT:<local_udp_port>       Sets local UDP port. 12200 by default\r\n$");
+    my_print_dos_string("/IP:<local_ipv4_addr>     Sets local IP address\r\n$");
+    my_print_dos_string("/PORT:<local_udp_port>    Sets local UDP port. 12200 by default\r\n$");
     my_print_dos_string(
-        "/PKT_INT:<packet_driver_int> Sets interrupt of used packet driver.\r\n"
-        "                             First found in range 0x60 - 0x80 by default.\r\n$");
-    my_print_dos_string("/MASK:<net_mask>             Sets network mask\r\n$");
-    my_print_dos_string("/GW:<gateway_addr>           Sets gateway address\r\n$");
-    my_print_dos_string("<local_drive_letter>         Specifies local drive to mount/unmount (e.g. H)\r\n$");
-    my_print_dos_string("<remote_drive_letter>        Specifies remote drive to mount/unmount (e.g. H)\r\n$");
-    my_print_dos_string("/ALL                         Unmount all drives\r\n$");
-    my_print_dos_string("<remote_ipv4_addr>           Specifies IP address of remote server\r\n$");
-    my_print_dos_string("<remote_udp_port>            Specifies remote UDP port. 12200 by default\r\n$");
-    my_print_dos_string("/?                           Display this help\r\n$");
+        "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
+        "                          First found in range 0x60 - 0x80 by default.\r\n$");
+    my_print_dos_string("/MASK:<net_mask>          Sets network mask\r\n$");
+    my_print_dos_string("/GW:<gateway_addr>        Sets gateway address\r\n$");
+    my_print_dos_string("<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n$");
+    my_print_dos_string("<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n$");
+    my_print_dos_string("/ALL                      Unmount all drives\r\n$");
+    my_print_dos_string("<remote_ipv4_addr>        Specifies IP address of remote server\r\n$");
+    my_print_dos_string("<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n$");
+    my_print_dos_string("/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n$");
+    my_print_dos_string("/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n$");
+    my_print_dos_string("/?                        Display this help\r\n$");
 }
 
 
@@ -2162,34 +2178,63 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_INSTALLED;
         }
 
-        if (argc != 4) {
-            my_print_dos_string(
-                "Bad argument count. Use mount <remote_ip>[:remote_port]/<remote_drive_letter> "
-                "<local_drive_letter>\r\n$");
-            return EXIT_BAD_ARG;
-        }
-
-        // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
+        int mount_drive_set = 0;
+        union ipv4_addr remote_ip;
         uint16_t remote_port = DRIVE_PROTO_UDP_PORT;
-        const char * endptr;
-        const union ipv4_addr remote_ip = parse_ipv4_addr(argv[2], &endptr);
-        if (*endptr == ':') {
-            remote_port = strto_ui16(endptr + 1, &endptr);
-        }
-        if (*endptr != '/') {
-            my_print_dos_string("Bad remote drive specification\r\n$");
-            return EXIT_BAD_ARG;
-        }
-        const uint8_t remote_drive_no = drive_to_num(endptr[1]);
-        if (remote_drive_no >= MAX_DRIVERS_COUNT) {
-            my_print_dos_string("Bad remote drive letter\r\n$");
-            return EXIT_BAD_DRIVE_LETTER;
+        uint8_t remote_drive_no;
+        uint8_t drive_no;
+        uint16_t min_rcv_tmo_sec = DEFAULT_MIN_RCV_TMO_SECONDS;
+        uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SECONDS;
+        for (int i = 2; i < argc; ++i) {
+            if (argv[i][0] != '/') {
+                // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
+                const char * endptr;
+                remote_ip = parse_ipv4_addr(argv[i], &endptr);
+                if (*endptr == ':') {
+                    remote_port = strto_ui16(endptr + 1, &endptr);
+                }
+                if (*endptr != '/') {
+                    my_print_dos_string("Bad remote drive specification\r\n$");
+                    return EXIT_BAD_ARG;
+                }
+                remote_drive_no = drive_to_num(endptr[1]);
+                if (remote_drive_no >= MAX_DRIVERS_COUNT) {
+                    my_print_dos_string("Bad remote drive letter\r\n$");
+                    return EXIT_BAD_DRIVE_LETTER;
+                }
+
+                if (++i >= argc) {
+                    my_print_dos_string("Missing local drive letter\r\n$");
+                    return EXIT_BAD_ARG;
+                }
+
+                drive_no = drive_to_num(argv[i][0]);
+                if (drive_no >= MAX_DRIVERS_COUNT) {
+                    my_print_dos_string("Bad local drive letter\r\n$");
+                    return EXIT_BAD_DRIVE_LETTER;
+                }
+
+                mount_drive_set = 1;
+
+                continue;
+            }
+            if (strn_upper_cmp(argv[i] + 1, "MIN_RCV_TMO:", 12) == 0) {
+                const char * endptr;
+                min_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
+                continue;
+            }
+            if (strn_upper_cmp(argv[i] + 1, "MAX_RCV_TMO:", 12) == 0) {
+                const char * endptr;
+                max_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
+                continue;
+            }
+            my_print_dos_string("Error: Unknown argument: $");
+            my_print_string(argv[i]);
+            my_print_dos_string("\r\n$");
         }
 
-        const uint8_t drive_no = drive_to_num(argv[3][0]);
-        if (drive_no >= MAX_DRIVERS_COUNT) {
-            my_print_dos_string("Bad local drive letter\r\n$");
-            return EXIT_BAD_DRIVE_LETTER;
+        if (!mount_drive_set) {
+            my_print_dos_string("Missing arguments\r\n$");
         }
 
         // if drive is already active, fail
@@ -2219,6 +2264,10 @@ int main(int argc, char * argv[]) {
         shared_data_ptr->drives[drive_no].remote_ip_idx = remote_ip_idx;
         shared_data_ptr->drives[drive_no].remote_port = remote_port;
         shared_data_ptr->ldrv[drive_no] = remote_drive_no;
+
+        // Convert timeouts to 18.2 Hz ticks (2 least significant bits ignored). Uses only integer operations.
+        shared_data_ptr->drives[drive_no].min_rcv_tmo_18_2_ticks_shr_2 = ((min_rcv_tmo_sec * 182) / 10) >> 2;
+        shared_data_ptr->drives[drive_no].max_rcv_tmo_18_2_ticks_shr_2 = ((max_rcv_tmo_sec * 182) / 10) >> 2;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)
