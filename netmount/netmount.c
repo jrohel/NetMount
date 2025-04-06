@@ -2088,6 +2088,7 @@ int main(int argc, char * argv[]) {
             my_print_dos_string("Error: Unknown argument: $");
             my_print_string(argv[i]);
             my_print_dos_string("\r\n$");
+            return EXIT_UNKNOWN_ARG;
         }
 
         if (!local_ip_set) {
@@ -2243,10 +2244,12 @@ int main(int argc, char * argv[]) {
             my_print_dos_string("Error: Unknown argument: $");
             my_print_string(argv[i]);
             my_print_dos_string("\r\n$");
+            return EXIT_UNKNOWN_ARG;
         }
 
         if (!mount_drive_set) {
             my_print_dos_string("Missing arguments\r\n$");
+            return EXIT_MISSING_ARG;
         }
 
         // if drive is already active, fail
