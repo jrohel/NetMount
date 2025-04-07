@@ -105,7 +105,9 @@ CS_VARIABLE(global_recv_data_len, int16_t, 2)  // length of received data, 0 mea
 CS_VARIABLE(global_orig_stack_ptr, int16_t __far *, 4)  // stack is array of 16 values
 CS_VARIABLE(global_my_2Fmux_id, uint8_t, 1)
 CS_VARIABLE(global_req_drive, uint8_t, 1)  // the requested drive, set by the INT 2F handler and read by process2f()
-CS_VARIABLE(global_sda_ptr, struct dos_sda __far *, 4)  // ptr to DOS SDA (set at startup, used by interrupt handler)
+CS_VARIABLE(global_ipv4_last_sent_packet_id, uint16_t, 2)  // id inserted into last IPv4 header
+CS_VARIABLE(global_request_last_sent_seq_num, uint8_t, 1)  // sequence number inserted into last request packet
+CS_VARIABLE(global_sda_ptr, struct dos_sda __far *, 4)     // ptr to DOS SDA (set at startup, used by interrupt handler)
 CS_VARIABLE(shared_data, struct shared_data, SHARED_DATA_SIZE)  // shared between NetMount processes
 
 
@@ -307,12 +309,13 @@ static uint16_t internet_checksum(const void * addr, uint16_t len) {
 
 
 static void create_ip(struct ipv4_hdr * ipv4, union ipv4_addr dst_addr, uint16_t data_len, uint8_t protocol) {
-    static uint16_t id = 0;
+    uint16_t * const id = getptr_global_ipv4_last_sent_packet_id();
 
     ipv4->version_ihl = (4 << 4) | (sizeof(*ipv4) / 4);
     ipv4->tos = 0;
     ipv4->total_len = swap_word(sizeof(*ipv4) + data_len);
-    ipv4->id = swap_word(++id);
+    ++*id;
+    ipv4->id = swap_word(*id);
     ipv4->flags_frag_offset = swap_word(0x2 << 13);  // flags = 0x2 (3 bits, 0x2 = don't fragment); frag_offset = 0
     ipv4->ttl = 64;
     ipv4->protocol = protocol;
@@ -535,7 +538,6 @@ static void __declspec(naked) pktdrv_recv(void) {
 // Returns the length of reply, or NETWORK_ERROR on error.
 static uint16_t send_request(
     uint8_t function, uint8_t local_drive, uint16_t request_data_len, uint8_t ** reply_data, uint16_t * reply_ax) {
-    static uint8_t seq = 0;
 
     // resolve remote drive - no need to validate it, it has been validated already by inthandler()
     const uint8_t drive = getptr_shared_data()->ldrv[local_drive];
@@ -545,9 +547,6 @@ static uint16_t send_request(
                                   sizeof(struct drive_proto_hdr) + request_data_len;
     if (frame_length > MAX_FRAMESIZE)
         return 0;
-
-    // inc seq
-    ++seq;
 
     struct ether_frame * const frame = getptr_global_send_buff();
 
@@ -570,12 +569,15 @@ static uint16_t send_request(
         sizeof(struct drive_proto_hdr) + request_data_len);
     getptr_shared_data()->last_remote_udp_port = getptr_shared_data()->drives[local_drive].remote_port;
 
+    uint8_t * const last_sent_sequence_num_ptr = getptr_global_request_last_sent_seq_num();
+    ++*last_sent_sequence_num_ptr;
+    const uint8_t sequence_num = *last_sent_sequence_num_ptr;
 
     struct drive_proto_hdr * const snd_drive_proto = (struct drive_proto_hdr *)frame->udp_data;
     const uint16_t len = request_data_len + sizeof(*snd_drive_proto);  // drive_proto_hdr and data length
     snd_drive_proto->version = DRIVE_PROTO_VERSION;
     snd_drive_proto->length_flags = len;
-    snd_drive_proto->sequence = seq;  // sequence number
+    snd_drive_proto->sequence = sequence_num;  // sequence number
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
     if (ENABLE_DRIVE_PROTO_CHECKSUM) {
@@ -637,7 +639,7 @@ static uint16_t send_request(
             }
 
             // validate sequence number
-            if (rcv_drive_proto->sequence != seq) {
+            if (rcv_drive_proto->sequence != sequence_num) {
                 // The response has a different sequence number than the request.
                 // It may be a delayed response to a previous repeated request.
                 goto ignore_frame;
