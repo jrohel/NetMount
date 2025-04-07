@@ -569,9 +569,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const std::filesystem::path directory = share.get_root() / path.parent_path();
 
             dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.native(), stack_attr);
-            if (!std::filesystem::is_directory(directory)) {
-                err_print(
-                    "ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: Directory \"{}\" does not exist\n", directory.native());
+            std::error_code ec;
+            if (!std::filesystem::is_directory(directory, ec)) {
+                if (ec) {
+                    err_print("ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ec.message());
+                } else {
+                    err_print(
+                        "ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: Directory \"{}\" does not exist\n",
+                        directory.native());
+                }
                 *ax = htole16(DOS_EXTERR_PATH_NOT_FOUND);
             } else {
                 try {
