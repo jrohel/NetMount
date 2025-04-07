@@ -200,6 +200,12 @@ bool FilesystemDB::find_file(
     uint16_t & nth,
     bool is_root_dir,
     bool use_fat_ioctl) {
+
+    if (items[handle].path.empty()) {
+        err_print("ERROR: FilesystemDB::find_file: handle {} not found\n", handle);
+        return false;
+    }
+
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (items[handle].directory_list.empty())) {
         long count = items[handle].create_directory_list(use_fat_ioctl);
