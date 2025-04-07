@@ -1684,22 +1684,14 @@ static struct dos_list_of_list __far * get_dos_list_of_list(void);
 
 // returns pointer to the CDS struct for drive, requires DOS 4+
 static struct dos_current_dir __far * get_cds(uint8_t drive_no) {
-    static enum { UNINITIALIZED, OK, ERROR } state = UNINITIALIZED;
-    static struct dos_current_dir __far * cds_array;
-    static uint8_t last_drive;
+    struct dos_list_of_list const __far * const list_of_list = get_dos_list_of_list();
+    const uint8_t last_drive = list_of_list->last_drive;
+    struct dos_current_dir __far * const cds_array = list_of_list->cds_ptr;
 
-    // init - do it only once
-    if (state == UNINITIALIZED) {
+    // some OS DOS emulators (at least OS/2) set the CDS array pointer to FFFF:FFFF
+    const int error = cds_array == (struct dos_current_dir const __far *)-1L;
 
-        struct dos_list_of_list const __far * const list_of_list = get_dos_list_of_list();
-        last_drive = list_of_list->last_drive;
-        cds_array = list_of_list->cds_ptr;
-
-        // some OS DOS emulators (at least OS/2) set the CDS array pointer to FFFF:FFFF
-        state = cds_array == (struct dos_current_dir const __far *)-1L ? ERROR : OK;
-    }
-
-    if (state == ERROR || drive_no > last_drive) {
+    if (error || drive_no > last_drive) {
         return NULL;
     }
 
