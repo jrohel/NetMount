@@ -22,7 +22,7 @@
 #include <cstdlib>
 #include <filesystem>
 
-#define PROGRAM_VERSION "1.0.1"
+#define PROGRAM_VERSION "1.0.2"
 
 #define MAX_DRIVERS_COUNT 26
 
