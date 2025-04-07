@@ -398,7 +398,9 @@ void set_item_attrs(const std::filesystem::path & path, uint8_t attrs) {
 }
 
 
-bool make_dir(const std::filesystem::path & dir) noexcept { return mkdir(dir.c_str(), 0) == 0; }
+bool make_dir(const std::filesystem::path & dir) noexcept {
+    return mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == 0;
+}
 
 
 bool delete_dir(const std::filesystem::path & dir) noexcept { return rmdir(dir.c_str()) == 0; }
