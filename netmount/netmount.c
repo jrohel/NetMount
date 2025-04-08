@@ -376,8 +376,8 @@ static void handle_arp(void) {
                 for (int j = 0;
                      j < sizeof(getptr_shared_data()->ip_mac_map) / sizeof(getptr_shared_data()->ip_mac_map[0]);
                      ++j) {
-                    if (j != i && getptr_shared_data()->ip_mac_map[j].ip.value &
-                                      getptr_shared_data()->net_mask.value != network) {
+                    if (j != i && (getptr_shared_data()->ip_mac_map[j].ip.value &
+                                   getptr_shared_data()->net_mask.value) != network) {
                         getptr_shared_data()->ip_mac_map[j].mac_addr = rcv_framebuf->arp.sender_hw_addr;
                     }
                 }
@@ -2043,6 +2043,13 @@ int main(int argc, char * argv[]) {
             return EXIT_MISSING_ARG;
         }
 
+        // Initialize the ip_mac_map table.
+        // Must be done before first use. That is, before setting the gateway address.
+        for (int i = 0; i < sizeof(getptr_shared_data()->ip_mac_map) / sizeof(getptr_shared_data()->ip_mac_map[0]);
+             ++i) {
+            getptr_shared_data()->ip_mac_map[i].ip.value = 0xFFFFFFFFUL;
+        }
+
         int local_ip_set = 0;
         getptr_shared_data()->gateway_ip_slot = 0xFF;
         getptr_shared_data()->local_port = DRIVE_PROTO_UDP_PORT;
@@ -2150,12 +2157,6 @@ int main(int argc, char * argv[]) {
         // set all drive mappings as 'unused'
         for (int i = 0; i < sizeof(getptr_shared_data()->ldrv); ++i)
             getptr_shared_data()->ldrv[i] = 0xFFU;
-
-        // init ip_mac_map table
-        for (int i = 0; i < sizeof(getptr_shared_data()->ip_mac_map) / sizeof(getptr_shared_data()->ip_mac_map[0]);
-             ++i) {
-            getptr_shared_data()->ip_mac_map[i].ip.value = 0xFFFFFFFFUL;
-        }
 
         *getptr_global_sda_ptr() = get_sda();
 
