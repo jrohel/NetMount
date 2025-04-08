@@ -21,6 +21,8 @@
 #define DEFAULT_MAX_NUM_REQUEST_RETRIES 4  // If it is changed, adjust the help
 #define MAX_FRAMESIZE                   1200
 
+#define ARP_REQUEST_RCV_TMO_SEC 1
+#define ARP_REQUEST_MAX_RETRIES 4
 
 #define MY_STACK_SIZE 1024
 
@@ -55,7 +57,8 @@ struct shared_data {
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
     uint16_t local_port;
-    uint8_t gateway_ip_slot;  // indx of ip in ip_mac_map table
+    int8_t disable_sending_arp_request;  // A non-zero value disables sending ARP requests, replying is still allowed.
+    uint8_t gateway_ip_slot;             // indx of ip in ip_mac_map table
     struct ip_mac_map {
         union ipv4_addr ip;
         struct mac_addr mac_addr;
@@ -73,7 +76,7 @@ struct shared_data {
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
 };
 
-#define SHARED_DATA_SIZE 252  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 253  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -99,6 +102,7 @@ static void * get_offset(const void * func);
 CS_VARIABLE(global_my_stack, int16_t, MY_STACK_SIZE)  // stack is array of 16 values
 CS_VARIABLE(global_recv_buff, struct ether_frame, MAX_FRAMESIZE)
 CS_VARIABLE(global_send_buff, struct ether_frame, MAX_FRAMESIZE)
+CS_VARIABLE(global_send_arp_request_buff, struct ether_frame, 42)  // 14 (MAC) + 28 (ARP)
 CS_VARIABLE(global_orig_INT2F_handler, interrupt_handler, 4)
 CS_VARIABLE(global_pktdrv_INT_handler, interrupt_handler, 4)
 CS_VARIABLE(global_recv_data_len, int16_t, 2)  // length of received data, 0 means "free", neg value means "awaiting"
@@ -533,29 +537,97 @@ static void __declspec(naked) pktdrv_recv(void) {
 }
 
 
+// Sends an ARP request and waits until the destination HW address is known or time expires.
+// If the destination HW address is still not known, sends the ARP request again and again
+// up to the defined maximum.
+static void send_arp_request(uint8_t local_drive) {
+    struct ether_frame * const frame = getptr_global_send_arp_request_buff();
+
+    volatile struct ip_mac_map * const ip_to_mac_map =
+        &getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx];
+
+    union ipv4_addr target_ip_addr = ip_to_mac_map->ip;
+
+    const uint32_t network = getptr_shared_data()->local_ipv4.value & getptr_shared_data()->net_mask.value;
+    if ((target_ip_addr.value & getptr_shared_data()->net_mask.value) != network) {
+        // Destination IP address is not in local network.
+        const uint8_t gw_ip_slot = getptr_shared_data()->gateway_ip_slot;
+        if (gw_ip_slot != 0xFFU) {
+            // However, there is a gateway. We'll send an ARP request to it.
+            target_ip_addr = getptr_shared_data()->ip_mac_map[gw_ip_slot].ip;
+        }
+    }
+
+    // Fill in the ARP destination IP address.
+    // The rest of the ARP frame is constant and was filled in during program initialization.
+    frame->arp.target_protocol_addr = target_ip_addr;
+
+    // Lowest 16 bits of timer. The default frequency is 18.2 Hz.
+    // Warning: this location won't increment while interrupts are disabled!
+    volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
+
+    // It sends an ARP request and waits until the destination HW address is known or time expires.
+    // If the destination HW address is still not known, sends the ARP request again and again
+    // up to the defined maximum.
+    for (int retries = 0; retries <= ARP_REQUEST_MAX_RETRIES; ++retries) {
+        const uint16_t length = sizeof(struct mac_hdr) + sizeof(struct arp_hdr);
+        send_frame(length, frame);
+
+        // Wait until the destination HW address is known (different from the "broadcast" address).
+        const uint16_t wait_start_time = *time;
+        const uint16_t timeout_ticks = (ARP_REQUEST_RCV_TMO_SEC * 182) / 10;
+        while (*time - wait_start_time <= timeout_ticks) {
+            // Check that the destination HW address is known. If yes, we are done.
+            for (int i = 0; i < sizeof(struct mac_addr); ++i) {
+                if (ip_to_mac_map->mac_addr.bytes[i] != 0xFF) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+
 // Sends the request stored in global_send_buff and waits for a response.
 // If no response is received, the send is repeated (the maximum number of sends is MAX_NUMBER_FRAME_SEND_RETRIES).
 // Returns the length of reply, or NETWORK_ERROR on error.
 static uint16_t send_request(
     uint8_t function, uint8_t local_drive, uint16_t request_data_len, uint8_t ** reply_data, uint16_t * reply_ax) {
 
-    // resolve remote drive - no need to validate it, it has been validated already by inthandler()
-    const uint8_t drive = getptr_shared_data()->ldrv[local_drive];
-
-    // if function too long then quit
     const uint16_t frame_length = sizeof(struct mac_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) +
                                   sizeof(struct drive_proto_hdr) + request_data_len;
+
+    // Cannot send a longer frame than MAX_FRAMESIZE.
     if (frame_length > MAX_FRAMESIZE)
         return 0;
 
+    volatile struct ip_mac_map * const ip_to_mac_map =
+        &getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx];
+
+    if (!getptr_shared_data()->disable_sending_arp_request) {
+        // Checks if the destination HW address is known. If not, we will try to discover it using ARP requests.
+        int dest_hw_addr_is_boadcast = 1;
+        const struct mac_addr dest_hw_addr = ip_to_mac_map->mac_addr;
+        for (unsigned int i = 0; i < sizeof(struct mac_addr); ++i) {
+            if (dest_hw_addr.bytes[i] != 0xFF) {
+                dest_hw_addr_is_boadcast = 0;
+                break;
+            }
+        }
+        if (dest_hw_addr_is_boadcast) {
+            send_arp_request(local_drive);
+        }
+    }
+
+    // resolve remote drive - no need to validate it, it has been validated already by inthandler()
+    const uint8_t drive = getptr_shared_data()->ldrv[local_drive];
+
     struct ether_frame * const frame = getptr_global_send_buff();
 
-    // Fill (ethernet) mac destination addres. Source mac address and ethertype was filled during initialization.
-    frame->mac.dest_hw_addr =
-        getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx].mac_addr;
+    // Fill (ethernet) HW (mac) destination addres. Source mac address and ethertype was filled during initialization.
+    frame->mac.dest_hw_addr = ip_to_mac_map->mac_addr;
 
-    const union ipv4_addr remote_ip =
-        getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx].ip;
+    const union ipv4_addr remote_ip = ip_to_mac_map->ip;
     create_ip(
         &frame->ipv4,
         remote_ip,
@@ -1955,6 +2027,7 @@ static void print_help(void) {
                         "\r\n"
                         "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
                         "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n"
+                        "         [/NO_ARP_REQUESTS]\r\n"
                         "\r\n"
                         "NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]\r\n"
                         "         [/MAX_RETRIES:<count>]\r\n"
@@ -1977,6 +2050,7 @@ static void print_help(void) {
                         "                          First found in range 0x60 - 0x80 by default.\r\n"
                         "/MASK:<net_mask>          Sets network mask\r\n"
                         "/GW:<gateway_addr>        Sets gateway address\r\n"
+                        "/NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed\r\n"
                         "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
                         "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
                         "/ALL                      Unmount all drives\r\n"
@@ -2012,7 +2086,8 @@ int main(int argc, char * argv[]) {
         return EXIT_UNKNOWN_CMD;
     }
 
-    // "install /IP:<local_ipv4_addr> [/MASK:<ipv4_net_mask>] [/GW:<gateway_ipv4_addr>] [/PORT:<udp_port>] [/PKT_INT:<packet_driver_int>]
+    // install /IP:<local_ipv4_addr> [/MASK:<ipv4_net_mask>] [/GW:<gateway_ipv4_addr>] [/PORT:<udp_port>]
+    // [/PKT_INT:<packet_driver_int>] [/NO_ARP_REQUESTS]
     if (strn_upper_cmp(argv[1], "INSTALL", 8) == 0) {
         if (!is_redir_install_allowed()) {
             my_print_dos_string("Redirector installation has been forbidden either by DOS or another process.\r\n$");
@@ -2055,6 +2130,7 @@ int main(int argc, char * argv[]) {
         getptr_shared_data()->local_port = DRIVE_PROTO_UDP_PORT;
         getptr_shared_data()->net_mask.value = 0;
         getptr_shared_data()->requested_pktdrv_int = 0;
+        getptr_shared_data()->disable_sending_arp_request = 0;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
                 my_print_dos_string("Unknown argument: $");
@@ -2084,6 +2160,10 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "PKT_INT:", 8) == 0) {
                 const char * endptr;
                 getptr_shared_data()->requested_pktdrv_int = strto_ui16(argv[i] + 9, &endptr);
+                continue;
+            }
+            if (strn_upper_cmp(argv[i] + 1, "NO_ARP_REQUESTS", 16) == 0) {
+                getptr_shared_data()->disable_sending_arp_request = 1;
                 continue;
             }
             my_print_dos_string("Error: Unknown argument: $");
@@ -2150,9 +2230,32 @@ int main(int argc, char * argv[]) {
         }
         my_print_dos_string("\r\n$");
 
-        struct ether_frame * const frame = getptr_global_send_buff();
-        frame->mac.source_hw_addr = getptr_shared_data()->local_mac_addr;
-        frame->mac.ether_type = swap_word(ETHER_TYPE_IPV4);
+        {
+            struct ether_frame * const frame = getptr_global_send_buff();
+            frame->mac.source_hw_addr = getptr_shared_data()->local_mac_addr;
+            frame->mac.ether_type = swap_word(ETHER_TYPE_IPV4);
+        }
+
+
+        {
+            // Initialize the ARP request. Except for the destination IP address, the content is constant.
+            struct ether_frame * const frame = getptr_global_send_arp_request_buff();
+            for (unsigned int byte_idx = 0; byte_idx < sizeof(frame->mac.dest_hw_addr); ++byte_idx) {
+                frame->mac.dest_hw_addr.bytes[byte_idx] = 0xFFU;  // Fill in the destination HW address with "broadcast"
+            }
+            frame->mac.source_hw_addr = getptr_shared_data()->local_mac_addr;
+            frame->mac.ether_type = swap_word(ETHER_TYPE_ARP);
+            frame->arp.hw_type = swap_word(HW_TYPE_ETHERNET);
+            frame->arp.protocol_type = swap_word(ETHER_TYPE_IPV4);
+            frame->arp.hw_addr_len = sizeof(struct mac_addr);
+            frame->arp.protocol_addr_len = sizeof(union ipv4_addr);
+            frame->arp.operation = swap_word(ARP_OPERATION_REQUEST);
+            frame->arp.sender_hw_addr = getptr_shared_data()->local_mac_addr;
+            frame->arp.sender_protocol_addr = getptr_shared_data()->local_ipv4;
+            for (unsigned int byte_idx = 0; byte_idx < sizeof(frame->mac.dest_hw_addr); ++byte_idx) {
+                frame->arp.target_hw_addr.bytes[byte_idx] = 0x00U;  // Clear target HW address in ARP header
+            }
+        }
 
         // set all drive mappings as 'unused'
         for (int i = 0; i < sizeof(getptr_shared_data()->ldrv); ++i)
