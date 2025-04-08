@@ -48,7 +48,7 @@ struct shared_data {
     uint8_t ldrv[MAX_DRIVERS_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
                                       // must be first in structure, used in assembler
     struct drive_info {
-        uint8_t remote_ip_idx;  // index of ip in ip_mac_map table
+        uint8_t remote_ip_idx;  // index of server ip address in ip_mac_map table
         uint16_t remote_port;
         uint8_t min_rcv_tmo_18_2_ticks_shr_2;  // Minimum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
@@ -58,7 +58,7 @@ struct shared_data {
     union ipv4_addr net_mask;
     uint16_t local_port;
     int8_t disable_sending_arp_request;  // A non-zero value disables sending ARP requests, replying is still allowed.
-    uint8_t gateway_ip_slot;             // indx of ip in ip_mac_map table
+    uint8_t gateway_ip_slot;             // index of gateway ip address in ip_mac_map table
     struct ip_mac_map {
         union ipv4_addr ip;
         struct mac_addr mac_addr;
@@ -305,7 +305,7 @@ static uint16_t internet_checksum(const void * addr, uint16_t len) {
 
     //  Fold 32-bit sum to 16 bits
     while ((sum >> 16) != 0) {
-        sum = (sum & 0xffff) + (sum >> 16);
+        sum = (sum & 0xFFFFU) + (sum >> 16);
     }
 
     return ~sum;
@@ -347,7 +347,7 @@ static void __declspec(naked) send_frame(uint16_t frame_length, const void * snd
 
     // clang-format off
     __asm {
-        mov ah, 0x04  // Packet Driver function Send Packet
+        mov ah, PKTDRV_FUNC_SEND_PKT
 
         // simulate INT instruction (pushf + cli + call __far)
         pushf
@@ -418,28 +418,28 @@ static void handle_arp(void) {
 static uint8_t handle_ipv4(void) {
     const struct ether_frame * const rcv_frame = getptr_global_recv_buff();
     if (rcv_frame->ipv4.protocol != IPV4_PROTOCOL_UDP) {
-        return 0xFFU;
+        return 0xFF;
     }
     if (rcv_frame->ipv4.dst_addr.value != getptr_shared_data()->local_ipv4.value) {
-        return 0xFFU;
+        return 0xFF;
     }
     if (rcv_frame->ipv4.src_addr.value != getptr_shared_data()->last_remote_ip.value) {
-        return 0xFFU;
+        return 0xFF;
     }
     if (rcv_frame->udp.src_port != swap_word(getptr_shared_data()->last_remote_udp_port)) {
-        return 0xFFU;
+        return 0xFF;
     }
     if (rcv_frame->udp.dst_port != swap_word(getptr_shared_data()->local_port)) {
-        return 0xFFU;
+        return 0xFF;
     }
 
     if (*getptr_global_recv_data_len() < offsetof(struct ether_frame, udp_data) + sizeof(struct drive_proto_hdr)) {
-        return 0xFFU;
+        return 0xFF;
     }
 
     const struct drive_proto_hdr * drive_proto = (const struct drive_proto_hdr *)rcv_frame->udp_data;
     if (drive_proto->version != DRIVE_PROTO_VERSION) {
-        return 0xFFU;
+        return 0xFF;
     }
 
     getptr_shared_data()->server_response_received = 1;
@@ -552,7 +552,7 @@ static void send_arp_request(uint8_t local_drive) {
     if ((target_ip_addr.value & getptr_shared_data()->net_mask.value) != network) {
         // Destination IP address is not in local network.
         const uint8_t gw_ip_slot = getptr_shared_data()->gateway_ip_slot;
-        if (gw_ip_slot != 0xFFU) {
+        if (gw_ip_slot != 0xFF) {
             // However, there is a gateway. We'll send an ARP request to it.
             target_ip_addr = getptr_shared_data()->ip_mac_map[gw_ip_slot].ip;
         }
@@ -653,7 +653,7 @@ static uint16_t send_request(
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
     if (ENABLE_DRIVE_PROTO_CHECKSUM) {
-        snd_drive_proto->length_flags |= 0x8000;  // switch checksum on
+        snd_drive_proto->length_flags |= 0x8000U;  // switch checksum on
         snd_drive_proto->checksum = bsd_checksum(
             (uint8_t *)(&snd_drive_proto->checksum + 1),
             len - ((uint8_t *)(&snd_drive_proto->checksum + 1) - (uint8_t *)snd_drive_proto));
@@ -700,7 +700,7 @@ static uint16_t send_request(
             }
 
             // validate frame length (if provided)
-            const uint16_t len = rcv_drive_proto->length_flags & 0x07FF;
+            const uint16_t len = rcv_drive_proto->length_flags & 0x07FFU;
             if (len > *recvrequest_data_len_ptr) {
                 // frame appears to be truncated
                 goto ignore_frame;
@@ -717,7 +717,7 @@ static uint16_t send_request(
                 goto ignore_frame;
             }
 
-            if (rcv_drive_proto->length_flags & 0x8000) {
+            if (rcv_drive_proto->length_flags & 0x8000U) {
                 // the received data contains a checksum
                 // if enabled, check the received checksum
                 if (ENABLE_DRIVE_PROTO_CHECKSUM &&
@@ -966,7 +966,7 @@ static void handle_request_for_our_drive(void) {
                 if (len == NETWORK_ERROR) {
                     set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
                     break;
-                } else if ((ax != 0) || (len != 2)) {
+                } else if (ax != 0 || len != sizeof(struct drive_proto_writef_reply)) {
                     set_error(r, ax);
                     break;
                 } else {  // success - write amount of bytes written into CX and update SFT
@@ -1089,9 +1089,9 @@ static void handle_request_for_our_drive(void) {
             }
 
             i = send_request(subfunction, reqdrv, len, &reply, &ax);
-            if ((uint16_t)i == 0xffffU) {
+            if ((uint16_t)i == 0xFFFFU) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if ((i != 9) || (ax != 0)) {
+            } else if (i != sizeof(struct drive_proto_get_attrs_reply) || ax != 0) {
                 set_error(r, ax);
             } else {
                 struct drive_proto_get_attrs_reply const * const args =
@@ -1213,22 +1213,22 @@ static void handle_request_for_our_drive(void) {
                     r->w.cx = args->result_code;
                 }
                 if (sft_ptr->open_mode &
-                    0x8000) {  // EtherDFS: if bit 15 is set, then it's a "FCB open", and requires the internal DOS
-                               // "Set FCB Owner" function to be called: TODO FIXME set_sft_owner()
+                    0x8000U) {  // EtherDFS: if bit 15 is set, then it's a "FCB open", and requires the internal DOS
+                                // "Set FCB Owner" function to be called: TODO FIXME set_sft_owner()
                 }
                 sft_ptr->file_attr = args->attrs;
-                sft_ptr->dev_info_word = 0x8040 | reqdrv;  // mark device as network & unwritten drive
+                sft_ptr->dev_info_word = 0x8040U | reqdrv;  // mark device as network & unwritten drive
                 sft_ptr->redir_data = 0;
                 sft_ptr->start_cluster = args->start_cluster;
                 sft_ptr->file_time = args->date_time;
                 sft_ptr->file_size = args->size;
                 sft_ptr->file_pos = 0;
-                sft_ptr->open_mode &= 0xff00u;
+                sft_ptr->open_mode &= 0xFF00U;
                 sft_ptr->open_mode |= args->mode;
-                sft_ptr->rel_sector = 0xffff;
-                sft_ptr->abs_sector = 0xffff;
+                sft_ptr->rel_sector = 0xFFFFU;
+                sft_ptr->abs_sector = 0xFFFFU;
                 sft_ptr->dir_sector = 0;
-                sft_ptr->dir_entry_no = 0xff;  // why such value? no idea, EtherDFS says PHANTON.C uses that
+                sft_ptr->dir_entry_no = 0xFF;  // why such value? no idea, EtherDFS says PHANTON.C uses that
                 sft_ptr->file_name = args->name;
             }
             break;
@@ -1281,7 +1281,7 @@ static void handle_request_for_our_drive(void) {
                     set_error(r, DOS_EXTERR_NO_MORE_FILES);
                 }
                 break;
-            } else if ((ax != 0) || (i != 24)) {
+            } else if (ax != 0 || i != sizeof(struct drive_proto_find_reply)) {
                 set_error(r, ax);
                 break;
             }
@@ -1336,7 +1336,7 @@ static void handle_request_for_our_drive(void) {
             i = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax);
             if (i == NETWORK_ERROR) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if ((ax != 0) || (i != 4)) {
+            } else if (ax != 0 || i != sizeof(struct drive_proto_seek_from_end_reply)) {
                 set_error(r, ax);
             } else {
                 struct drive_proto_seek_from_end_reply const * const args =
@@ -1741,7 +1741,7 @@ static interrupt_handler get_intr_vector(uint8_t num);
 // CF set on error (AX=error code)
 static struct dos_sda __far * get_sda(void);
 #pragma aux get_sda = \
-    "mov ax, 0x5d06"  \
+    "mov ax, 0x5D06"  \
     "push ds"         \
     "int 0x21"        \
     "mov cx, ds"      \
@@ -1784,8 +1784,8 @@ static uint16_t get_CS(void);
 
 
 static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data_ptr, union ipv4_addr ip) {
-    uint8_t ip_idx = 0xFFU;
-    uint8_t free_ip_idx = 0xFFU;
+    uint8_t ip_idx = 0xFF;
+    uint8_t free_ip_idx = 0xFF;
 
     for (int i = 0; i < sizeof(getptr_shared_data()->ip_mac_map) / sizeof(getptr_shared_data()->ip_mac_map[0]); ++i) {
         if (shared_data_ptr->ip_mac_map[i].ip.value == ip.value) {
@@ -1797,8 +1797,8 @@ static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data
         }
     }
 
-    if (ip_idx == 0xFFU) {
-        if (free_ip_idx != 0xFFU) {
+    if (ip_idx == 0xFF) {
+        if (free_ip_idx != 0xFF) {
             ip_idx = free_ip_idx;
         } else {
             // try if some IP slot can be reused (umounted drive)
@@ -1821,10 +1821,10 @@ static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data
         }
     }
 
-    if (ip_idx != 0xFFU && ip_idx == free_ip_idx) {
+    if (ip_idx != 0xFF && ip_idx == free_ip_idx) {
         shared_data_ptr->ip_mac_map[free_ip_idx].ip = ip;
         for (int byte_idx = 0; byte_idx < sizeof(getptr_shared_data()->ip_mac_map[0].mac_addr); ++byte_idx) {
-            shared_data_ptr->ip_mac_map[free_ip_idx].mac_addr.bytes[byte_idx] = 0xFFU;
+            shared_data_ptr->ip_mac_map[free_ip_idx].mac_addr.bytes[byte_idx] = 0xFF;
         }
     }
 
@@ -1848,7 +1848,7 @@ static uint8_t __declspec(naked) pktdrv_register_type(
 
         mov ah, PKTDRV_FUNC_ACCESS_TYPE
         mov al, 1  // if_class = 1(eth)
-        mov bx, 0xffff  // if_type = 0xffff means 'all'
+        mov bx, 0xFFFF  // if_type = 0xFFFF means 'all'
         xor dl, dl  // if_number: 0 (first interface)
         // DS:SI points to the ethertype value in network byte order (SI is func input parameter)
         mov cx, 2  // typelen (ethertype len is 2 bytes)
@@ -2013,8 +2013,8 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     }
     cds->flags = 0;
 
-    shared_data_ptr->ldrv[drive_no] = 0xFFU;
-    shared_data_ptr->drives[drive_no].remote_ip_idx = 0xFFU;
+    shared_data_ptr->ldrv[drive_no] = 0xFF;
+    shared_data_ptr->drives[drive_no].remote_ip_idx = 0xFF;
     return 0;
 }
 
@@ -2241,7 +2241,7 @@ int main(int argc, char * argv[]) {
             // Initialize the ARP request. Except for the destination IP address, the content is constant.
             struct ether_frame * const frame = getptr_global_send_arp_request_buff();
             for (unsigned int byte_idx = 0; byte_idx < sizeof(frame->mac.dest_hw_addr); ++byte_idx) {
-                frame->mac.dest_hw_addr.bytes[byte_idx] = 0xFFU;  // Fill in the destination HW address with "broadcast"
+                frame->mac.dest_hw_addr.bytes[byte_idx] = 0xFF;  // Fill in the destination HW address with "broadcast"
             }
             frame->mac.source_hw_addr = getptr_shared_data()->local_mac_addr;
             frame->mac.ether_type = swap_word(ETHER_TYPE_ARP);
@@ -2253,13 +2253,13 @@ int main(int argc, char * argv[]) {
             frame->arp.sender_hw_addr = getptr_shared_data()->local_mac_addr;
             frame->arp.sender_protocol_addr = getptr_shared_data()->local_ipv4;
             for (unsigned int byte_idx = 0; byte_idx < sizeof(frame->mac.dest_hw_addr); ++byte_idx) {
-                frame->arp.target_hw_addr.bytes[byte_idx] = 0x00U;  // Clear target HW address in ARP header
+                frame->arp.target_hw_addr.bytes[byte_idx] = 0x00;  // Clear target HW address in ARP header
             }
         }
 
         // set all drive mappings as 'unused'
         for (int i = 0; i < sizeof(getptr_shared_data()->ldrv); ++i)
-            getptr_shared_data()->ldrv[i] = 0xFFU;
+            getptr_shared_data()->ldrv[i] = 0xFF;
 
         *getptr_global_sda_ptr() = get_sda();
 
@@ -2369,7 +2369,7 @@ int main(int argc, char * argv[]) {
         struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
 
         const uint8_t remote_ip_idx = assign_remote_ip_addr_slot(shared_data_ptr, remote_ip);
-        if (remote_ip_idx == 0xFFU) {
+        if (remote_ip_idx == 0xFF) {
             my_print_dos_string("Error: Not free slot for remote IP address\r\n$");
             return EXIT_NOT_FREE_SLOT_FOR_REMOTE_IP;
         }
@@ -2414,7 +2414,7 @@ int main(int argc, char * argv[]) {
 
         if (strn_upper_cmp(argv[2], "/ALL", 5) == 0) {
             for (int drive_no = 0; drive_no < MAX_DRIVERS_COUNT; ++drive_no) {
-                if (shared_data_ptr->ldrv[drive_no] != 0xFFU) {
+                if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
                     retval |= umount(shared_data_ptr, drive_no);
                 }
             }
@@ -2425,7 +2425,7 @@ int main(int argc, char * argv[]) {
                 my_print_dos_string("Bad local drive letter\r\n$");
                 return EXIT_BAD_DRIVE_LETTER;
             }
-            if (shared_data_ptr->ldrv[drive_no] == 0xFFU) {
+            if (shared_data_ptr->ldrv[drive_no] == 0xFF) {
                 my_print_dos_string("Drive is not mounted by NetMount\r\n$");
                 return EXIT_DRIVE_NOT_MOUNTED;
             }
