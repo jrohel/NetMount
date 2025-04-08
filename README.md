@@ -20,7 +20,9 @@ NetMount allows DOS to mount directories from remote computers as network drives
 NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
          [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]
 
-NETMOUNT MOUNT <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
+NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]
+         [/MAX_RETRIES:<count>]
+         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
          <local_drive_letter>
 
 NETMOUNT UMOUNT <local_drive_letter>
@@ -28,23 +30,26 @@ NETMOUNT UMOUNT <local_drive_letter>
 NETMOUNT UMOUNT /ALL
 
 Commands:
-INSTALL                      Installs NetMount as resident (TSR)
-MOUNT                        Mounts remote drive as local drive
-UMOUNT                       Unmounts local drive(s) from remote drive
+INSTALL                   Installs NetMount as resident (TSR)
+MOUNT                     Mounts remote drive as local drive
+UMOUNT                    Unmounts local drive(s) from remote drive
 
 Arguments:
-/IP:<local_ipv4_addr>        Sets local IP address
-/PORT:<local_udp_port>       Sets local UDP port. 12200 by default
-/PKT_INT:<packet_driver_int> Sets interrupt of used packet driver.
-                             First found in range 0x60 - 0x80 by default.
-/MASK:<net_mask>             Sets network mask
-/GW:<gateway_addr>           Sets gateway address
-<local_drive_letter>         Specifies local drive to mount/unmount (e.g. H)
-<remote_drive_letter>        Specifies remote drive to mount/unmount (e.g. H)
-/ALL                         Unmount all drives
-<remote_ipv4_addr>           Specifies IP address of remote server
-<remote_udp_port>            Specifies remote UDP port. 12200 by default
-/?                           Display this help
+/IP:<local_ipv4_addr>     Sets local IP address
+/PORT:<local_udp_port>    Sets local UDP port. 12200 by default
+/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.
+                          First found in range 0x60 - 0x80 by default.
+/MASK:<net_mask>          Sets network mask
+/GW:<gateway_addr>        Sets gateway address
+<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)
+<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)
+/ALL                      Unmount all drives
+<remote_ipv4_addr>        Specifies IP address of remote server
+<remote_udp_port>         Specifies remote UDP port. 12200 by default
+/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)
+/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)
+/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)
+/?                        Display this help
 ```
 
 -----

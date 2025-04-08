@@ -18,11 +18,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
 
-#define PROGRAM_VERSION "1.0.0"
+#define PROGRAM_VERSION "1.0.2"
 
 #define MAX_DRIVERS_COUNT 26
 
@@ -438,10 +439,18 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto filemaskfcb = filename_to_fcb(filemask.c_str());
             dbg_print(
                 "FIND_FIRST in \"{}\"\n filemask: \"{}\"\n attrs: 0x{:2X}\n", directory.native(), filemask, fattr);
+            std::error_code ec;
+            const bool is_root_dir = std::filesystem::equivalent(directory, share.get_root(), ec);
+            if (ec) {
+                dbg_print("is_root_dir: {}\n", ec.message());
+                // do not use DOS_EXTERR_FILE_NOT_FOUND, some applications rely on a failing FIND_FIRST
+                // to return DOS_EXTERR_NO_MORE_FILES (e.g. LapLink 5)
+                *ax = htole16(DOS_EXTERR_NO_MORE_FILES);
+                break;
+            }
             const uint16_t handle = fs.get_handle(directory);
             DosFileProperties properties;
             uint16_t fpos = 0;
-            const bool is_root_dir = std::filesystem::equivalent(directory, share.get_root());
             if ((handle == 0xFFFFu) ||
                 !fs.find_file(properties, handle, filemaskfcb, fattr, fpos, is_root_dir, share.is_on_fat())) {
                 dbg_print("No matching file found\n");
@@ -480,8 +489,20 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 handle,
                 fcb_file_name_to_cstr(*fcbmask),
                 fattr);
+            const auto & path = fs.get_handle_path(handle);
+            if (path.empty()) {
+                err_print("ERROR: FIND_NEXT handle {} not found\n", handle);
+                *ax = htole16(DOS_EXTERR_NO_MORE_FILES);
+                break;
+            }
+            std::error_code ec;
+            const bool is_root_dir = std::filesystem::equivalent(path, share.get_root(), ec);
+            if (ec) {
+                dbg_print("is_root_dir: {}\n", ec.message());
+                *ax = htole16(DOS_EXTERR_NO_MORE_FILES);
+                break;
+            }
             DosFileProperties properties;
-            const bool is_root_dir = std::filesystem::equivalent(fs.get_handle_path(handle), share.get_root());
             if (!fs.find_file(properties, handle, *fcbmask, fattr, fpos, is_root_dir, share.is_on_fat())) {
                 dbg_print("No more matching files found\n");
                 *ax = htole16(DOS_EXTERR_NO_MORE_FILES);
@@ -549,9 +570,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const std::filesystem::path directory = share.get_root() / path.parent_path();
 
             dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.native(), stack_attr);
-            if (!std::filesystem::is_directory(directory)) {
-                err_print(
-                    "ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: Directory \"{}\" does not exist\n", directory.native());
+            std::error_code ec;
+            if (!std::filesystem::is_directory(directory, ec)) {
+                if (ec) {
+                    err_print("ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ec.message());
+                } else {
+                    err_print(
+                        "ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: Directory \"{}\" does not exist\n",
+                        directory.native());
+                }
                 *ax = htole16(DOS_EXTERR_PATH_NOT_FOUND);
             } else {
                 try {

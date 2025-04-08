@@ -20,6 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <format>
 #include <string>
 
@@ -203,6 +204,12 @@ bool FilesystemDB::find_file(
     uint16_t & nth,
     bool is_root_dir,
     bool use_fat_ioctl) {
+
+    if (items[handle].path.empty()) {
+        err_print("ERROR: FilesystemDB::find_file: handle {} not found\n", handle);
+        return false;
+    }
+
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (items[handle].directory_list.empty())) {
         long count = items[handle].create_directory_list(use_fat_ioctl);
@@ -425,7 +432,9 @@ void set_item_attrs(const std::filesystem::path & path, uint8_t attrs) {
 }
 
 
-bool make_dir(const std::filesystem::path & dir) noexcept { return mkdir(dir.c_str(), 0) == 0; }
+bool make_dir(const std::filesystem::path & dir) noexcept {
+    return mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == 0;
+}
 
 
 bool delete_dir(const std::filesystem::path & dir) noexcept { return rmdir(dir.c_str()) == 0; }
