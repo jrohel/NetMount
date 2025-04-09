@@ -12,7 +12,7 @@
 
 #pragma pack(1)
 
-#define PROGRAM_VERSION "1.1.1"
+#define PROGRAM_VERSION "1.2.0"
 
 // Program parameters
 #define ENABLE_DRIVE_PROTO_CHECKSUM     1
