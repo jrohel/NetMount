@@ -473,7 +473,7 @@ static void __declspec(naked) pktdrv_recv(void) {
         ja no_buffer_avail  // received frame is biger then our buffer
 
         cmp word ptr global_recv_data_len, 0
-        jg no_buffer_avail  // if > 0, we're busy, the received buffer has already been filled
+        jne no_buffer_avail  // if global_recv_data_len != 0, the receive buffer is already used
 
         // buffer is available, set its seg:off to es:di
         push ds
