@@ -887,23 +887,29 @@ int main(int argc, char ** argv) {
     signal(SIGINT, signal_handler);
 
     // Print table with shared drives
+#ifdef __linux__
     bool some_drive_not_fat = false;
+#endif
     for (std::size_t i = 0; i < shares.get_infos().size(); ++i) {
         const auto & share = shares.get_info(i);
         if (!share.is_used()) {
             continue;
         }
+#ifdef __linux__
         if (!share.is_on_fat()) {
             some_drive_not_fat = true;
         }
+#endif
         print(stdout, "{:c} {:c}: => {}\n", share.is_on_fat() ? ' ' : '*', 'A' + i, share.get_root().string());
     }
+#ifdef __linux__
     if (some_drive_not_fat) {
         print(
             stdout,
             "WARNING: It looks like drives marked with '*' are not stored on a FAT file system. "
             "DOS attributes will not be supported on these drives.\n\n");
     }
+#endif
 
     // main loop
     uint8_t request_packet[2048];

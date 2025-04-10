@@ -8,9 +8,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#ifdef __linux__
 #include <linux/msdos_fs.h>
+#endif
 #include <string.h>
+#ifdef __linux__
 #include <sys/ioctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
@@ -326,7 +330,7 @@ fcb_file_name filename_to_fcb(const char * filename) noexcept {
 
 
 uint8_t get_path_dos_properties(
-    const std::filesystem::path & path, DosFileProperties * properties, bool use_fat_ioctl) {
+    const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] bool use_fat_ioctl) {
     struct stat statbuf;
     if (stat(path.c_str(), &statbuf) != 0) {
         return FAT_ERROR_ATTR;  // error (probably doesn't exist)
@@ -355,6 +359,7 @@ uint8_t get_path_dos_properties(
         properties->size = statbuf.st_size;
     }
 
+#ifdef __linux__
     // if not a FAT drive, return a fake attribute archive
     if (!use_fat_ioctl) {
         if (properties) {
@@ -380,10 +385,17 @@ uint8_t get_path_dos_properties(
         }
         return attr;
     }
+#else
+    if (properties) {
+        properties->attrs = FAT_ARCHIVE;
+    }
+    return FAT_ARCHIVE;
+#endif
 }
 
 
-void set_item_attrs(const std::filesystem::path & path, uint8_t attrs) {
+void set_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe_unused]] uint8_t attrs) {
+#ifdef __linux__
     int fd, res;
     fd = open(path.c_str(), O_RDONLY);
     if (fd == -1) {
@@ -395,6 +407,7 @@ void set_item_attrs(const std::filesystem::path & path, uint8_t attrs) {
     if (res < 0) {
         throw std::runtime_error(std::format("Cannot set file attributes: {}", strerror(orig_errno)));
     }
+#endif
 }
 
 
@@ -501,7 +514,8 @@ std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path) 
 }
 
 
-bool is_on_fat(const std::filesystem::path & path) {
+bool is_on_fat([[maybe_unused]] const std::filesystem::path & path) {
+#ifdef __linux__
     auto fd = open(path.c_str(), O_RDONLY);
     if (fd == -1)
         return false;
@@ -513,6 +527,9 @@ bool is_on_fat(const std::filesystem::path & path) {
     }
     close(fd);
     return true;
+#else
+    return false;
+#endif
 }
 
 }  // namespace netmount_srv
