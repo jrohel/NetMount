@@ -16,7 +16,6 @@
 #include <sys/ioctl.h>
 #endif
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -502,15 +501,8 @@ bool rename_file(const std::filesystem::path & old_name, const std::filesystem::
 
 
 std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path) {
-    struct statvfs buf;
-    if (statvfs(path.c_str(), &buf) != 0) {
-        return {0, 0};
-    }
-    uint64_t size = buf.f_blocks;
-    size *= buf.f_frsize;
-    uint64_t free = buf.f_bfree;
-    free *= buf.f_bsize;
-    return {size, free};
+    const auto info = std::filesystem::space(path);
+    return {info.capacity, info.free};
 }
 
 
