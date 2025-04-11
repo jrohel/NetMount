@@ -4,18 +4,15 @@
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
 #include "fs.hpp"
+#include "udp_socket.hpp"
 #include "utils.hpp"
 
-#include <arpa/inet.h>
 #include <endian.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
 #include <time.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -87,7 +84,7 @@ public:
     struct ReplyInfo {
         std::array<uint8_t, 1500> packet;  // entire packet that was sent
         uint16_t len{0};                   // packet length
-        struct in_addr ipv4_addr;          // remote IP address
+        uint32_t ipv4_addr;                // remote IP address
         uint16_t udp_port;                 // remote UDP port
         time_t timestamp;                  // time of answer (so if cache full I can drop oldest)
 
@@ -99,19 +96,19 @@ public:
     };
 
     // Finds the cache entry related to given client, or the oldest one for reuse
-    ReplyInfo & get_reply_info(struct in_addr ipv4_addr, uint16_t udp_port) noexcept;
+    ReplyInfo & get_reply_info(uint32_t ipv4_addr, uint16_t udp_port) noexcept;
 
 private:
     std::array<ReplyInfo, REPLY_CACHE_SIZE> items;
 };
 
 
-ReplyCache::ReplyInfo & ReplyCache::get_reply_info(struct in_addr ipv4_addr, uint16_t udp_port) noexcept {
+ReplyCache::ReplyInfo & ReplyCache::get_reply_info(uint32_t ipv4_addr, uint16_t udp_port) noexcept {
     auto * oldest_item = &items[0];
 
     // search for item with matching address (ip and port)
     for (auto & item : items) {
-        if (memcmp(&item.ipv4_addr, &ipv4_addr, sizeof(ipv4_addr)) == 0 && item.udp_port == udp_port) {
+        if (item.ipv4_addr == ipv4_addr && item.udp_port == udp_port) {
             return item;  // found
         }
         if (item.timestamp < oldest_item->timestamp) {
@@ -680,46 +677,6 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 }
 
 
-int udp_sock(const std::string & bind_addr, uint16_t udp_bind_port) {
-    int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (socketfd == -1) {
-        perror("socket");
-        return -1;
-    }
-
-    do {
-        auto addr = INADDR_ANY;
-        if (!bind_addr.empty()) {
-            if (inet_pton(AF_INET, bind_addr.c_str(), &addr) <= 0) {
-                perror("Invalid IP address");
-                break;
-            }
-        }
-
-        struct sockaddr_in server;
-        memset(&server, 0, sizeof(server));
-        server.sin_family = AF_INET;
-        server.sin_addr.s_addr = addr;
-        server.sin_port = htons(udp_bind_port);
-
-        if (bind(socketfd, (struct sockaddr *)&server, sizeof(server)) == -1) {
-            perror("bind");
-            break;
-        }
-
-        errno = 0;
-        return socketfd;
-    } while (0);
-
-    {
-        const int saved_errno = errno;
-        close(socketfd);
-        errno = saved_errno;
-        return -1;
-    }
-}
-
-
 // used for debug output of frames on screen
 #ifdef DEBUG
 void dump_packet(const unsigned char * frame, int len) {
@@ -875,11 +832,8 @@ int main(int argc, char ** argv) {
     }
 
     // Prepare UDP socket
-    auto sock = udp_sock(bind_addr, bind_port);
-    if (sock == -1) {
-        print(stderr, "ERROR: Failed to open socket: {}\n", strerror(errno));
-        return 1;
-    }
+    UdpSocket sock;
+    sock.bind(bind_addr.c_str(), bind_port);
 
     // setup signals handler
     signal(SIGTERM, signal_handler);
@@ -912,187 +866,170 @@ int main(int argc, char ** argv) {
 #endif
 
     // main loop
-    uint8_t request_packet[2048];
-    while (exit_flag == 0) {
-        struct timeval timeout = {10, 0};  // set timeout to 10s
-        fd_set rfds, efds;
-        FD_ZERO(&rfds);
-        FD_ZERO(&efds);
-        FD_SET(sock, &rfds);
-        FD_SET(sock, &efds);
-        const int select_ret = select(sock + 1, &rfds, NULL, &efds, &timeout);
-
-        if (select_ret == -1) {
-            if (errno == EINTR) {
-                dbg_print("select: A signal was caught\n");
-                continue;
-            } else {
-                err_print("ERROR: select: {}\n", strerror(errno));
-                return -1;
+    try {
+        uint8_t request_packet[2048];
+        while (exit_flag == 0) {
+            const auto wait_result = sock.wait_for_data(10000);
+            switch (wait_result) {
+                case UdpSocket::WaitResult::TIMEOUT:
+                    dbg_print("wait_for_data(): Timeout\n");
+                    continue;
+                case UdpSocket::WaitResult::SIGNAL:
+                    dbg_print("wait_for_data(): A signal was caught\n");
+                    continue;
+                case UdpSocket::WaitResult::READY:
+                    break;
             }
-        }
 
-        if (select_ret == 0) {
-            dbg_print("select: Timeout\n");
-            continue;
-        }
+            auto request_packet_len = sock.receive(request_packet, sizeof(request_packet));
 
-        struct sockaddr_in peer_addr;
-        socklen_t peer_addrlen = sizeof(peer_addr);
-        int request_packet_len = recvfrom(
-            sock, request_packet, sizeof(request_packet), MSG_DONTWAIT, (struct sockaddr *)&peer_addr, &peer_addrlen);
-
-        dbg_print("--------------------------------\n");
-        {
-            char peer_addr_str[16];
-            dbg_print(
-                "Received packet, {} bytes from {}:{}\n",
-                request_packet_len,
-                inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                ntohs(peer_addr.sin_port));
-
-            if (request_packet_len < static_cast<int>(sizeof(struct drive_proto_hdr))) {
-                err_print(
-                    "ERROR: received a truncated/malformed packet from {}:{}\n",
-                    inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                    ntohs(peer_addr.sin_port));
-                continue;
-            }
-        }
-
-        // check the protocol version
-        auto * header = reinterpret_cast<const drive_proto_hdr *>(request_packet);
-        if (header->version != DRIVE_PROTO_VERSION) {
-            char peer_addr_str[16];
-            err_print(
-                "ERROR: unsupported protocol version {:d} from {}:{}\n",
-                header->version,
-                inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                ntohs(peer_addr.sin_port));
-            continue;
-        }
-
-        cksumflag = le16toh(header->length_flags) >> 15;
-
-        const uint16_t length_from_header = le16toh(header->length_flags) & 0x7FF;
-        if (length_from_header < sizeof(struct drive_proto_hdr)) {
-            char peer_addr_str[16];
-            err_print(
-                "ERROR: received a malformed packet from {}:{}\n",
-                inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                ntohs(peer_addr.sin_port));
-            continue;
-        }
-        if (length_from_header > request_packet_len) {
-            // corupted/truncated packet
-            char peer_addr_str[16];
-            err_print(
-                "ERROR: received a truncated packet from {}:{}\n",
-                inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                ntohs(peer_addr.sin_port));
-            continue;
-        } else {
-#ifdef DEBUG
-            if (request_packet_len != length_from_header) {
-                char peer_addr_str[16];
+            dbg_print("--------------------------------\n");
+            {
                 dbg_print(
-                    "Received UDP packet with extra data at the end from {}:{} (length in header = {}, packet len "
-                    "= "
-                    "{})\n",
-                    inet_ntop(AF_INET, &peer_addr.sin_addr, peer_addr_str, sizeof(peer_addr_str)),
-                    ntohs(peer_addr.sin_port),
-                    length_from_header,
-                    request_packet_len);
+                    "Received packet, {} bytes from {}:{}\n",
+                    request_packet_len,
+                    sock.get_last_remote_ip_str(),
+                    sock.get_last_remote_port());
+
+                if (request_packet_len < static_cast<int>(sizeof(struct drive_proto_hdr))) {
+                    err_print(
+                        "ERROR: received a truncated/malformed packet from {}:{}\n",
+                        sock.get_last_remote_ip_str(),
+                        sock.get_last_remote_port());
+                    continue;
+                }
             }
-#endif
-            // length_from_header seems sane, use it instead of received lenght
-            request_packet_len = length_from_header;
-        }
 
-#ifdef DEBUG
-        dbg_print(
-            "Received packet of {} bytes (cksum = {})\n",
-            request_packet_len,
-            (cksumflag != 0) ? "ENABLED" : "DISABLED");
-        dump_packet(request_packet, request_packet_len);
-#endif
-
-#ifdef SIMULATE_PACKET_LOSS
-        // simulated random input packet LOSS
-        if ((rand() & 31) == 0) {
-            print(stderr, "Incoming packet lost!\n");
-            continue;
-        }
-#endif
-
-        // check the checksum, if any
-        if (cksumflag != 0) {
-            uint16_t cksum_remote, cksum_mine;
-            cksum_mine = bsd_checksum(
-                &header->checksum + 1,
-                request_packet_len - (reinterpret_cast<const uint8_t *>(&header->checksum + 1) -
-                                      reinterpret_cast<const uint8_t *>(header)));
-            cksum_remote = le16toh(header->checksum);
-            if (cksum_mine != cksum_remote) {
-                print(stderr, "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n", cksum_mine, cksum_remote);
+            // check the protocol version
+            auto * header = reinterpret_cast<const drive_proto_hdr *>(request_packet);
+            if (header->version != DRIVE_PROTO_VERSION) {
+                err_print(
+                    "ERROR: unsupported protocol version {:d} from {}:{}\n",
+                    header->version,
+                    sock.get_last_remote_ip_str(),
+                    sock.get_last_remote_port());
                 continue;
             }
-        } else {
-            const uint16_t recv_magic = le16toh(header->checksum);
-            if (recv_magic != DRIVE_PROTO_MAGIC) {
-                print(stderr, "Bad MAGIC! Expected: 0x{:04X} Received: 0x{:04X}\n", DRIVE_PROTO_MAGIC, recv_magic);
+
+            cksumflag = le16toh(header->length_flags) >> 15;
+
+            const uint16_t length_from_header = le16toh(header->length_flags) & 0x7FF;
+            if (length_from_header < sizeof(struct drive_proto_hdr)) {
+                err_print(
+                    "ERROR: received a malformed packet from {}:{}\n",
+                    sock.get_last_remote_ip_str(),
+                    sock.get_last_remote_port());
                 continue;
             }
-        }
-
-        auto & reply_info = answer_cache.get_reply_info(peer_addr.sin_addr, peer_addr.sin_port);
-        const int send_msg_len = process_request(reply_info, request_packet, request_packet_len);
-        // update reply cache entry
-        if (send_msg_len >= 0) {
-            reply_info.len = send_msg_len;
-            reply_info.timestamp = time(NULL);
-        } else {
-            reply_info.len = 0;
-        }
-
-#ifdef SIMULATE_PACKET_LOSS
-        // simulated random ouput packet LOSS
-        if ((rand() & 31) == 0) {
-            print(stderr, "Outgoing packet lost!\n");
-            continue;
-        }
-#endif
-
-        if (send_msg_len > 0) {
-            // fill in header
-            auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.packet.data());
-            header->length_flags = htole16(send_msg_len);
-            if (cksumflag != 0) {
-                uint16_t checksum = bsd_checksum(
-                    &header->checksum + 1,
-                    send_msg_len -
-                        (reinterpret_cast<uint8_t *>(&header->checksum + 1) - reinterpret_cast<uint8_t *>(header)));
-                header->checksum = htole16(checksum);
-                header->length_flags |= htole16(0x8000);  // set the checksum flag
+            if (length_from_header > request_packet_len) {
+                // corupted/truncated packet
+                err_print(
+                    "ERROR: received a truncated packet from {}:{}\n",
+                    sock.get_last_remote_ip_str(),
+                    sock.get_last_remote_port());
+                continue;
             } else {
-                header->checksum = htole16(DRIVE_PROTO_MAGIC);
-                header->length_flags &= htole16(0x7FFF);  // zero the checksum flag
-            }
 #ifdef DEBUG
-            dbg_print("Sending back an answer of {} bytes\n", send_msg_len);
-            dump_packet(reply_info.packet.data(), send_msg_len);
+                if (request_packet_len != length_from_header) {
+                    dbg_print(
+                        "Received UDP packet with extra data at the end from {}:{} "
+                        "(length in header = {}, packet len = {})\n",
+                        sock.get_last_remote_ip_str(),
+                        sock.get_last_remote_port(),
+                        length_from_header,
+                        request_packet_len);
+                }
 #endif
-            auto i = sendto(
-                sock, reply_info.packet.data(), send_msg_len, 0, (struct sockaddr *)&peer_addr, sizeof(peer_addr));
-            if (i < 0) {
-                err_print("ERROR: sendto: {}\n", strerror(errno));
-            } else if (i != send_msg_len) {
-                err_print("ERROR: sendto: {} bytes sent but {} bytes requested\n", i, send_msg_len);
+                // length_from_header seems sane, use it instead of received lenght
+                request_packet_len = length_from_header;
             }
-        } else {
-            err_print("ERROR: Request ignored: Returned {}\n", send_msg_len);
+
+#ifdef DEBUG
+            dbg_print(
+                "Received packet of {} bytes (cksum = {})\n",
+                request_packet_len,
+                (cksumflag != 0) ? "ENABLED" : "DISABLED");
+            dump_packet(request_packet, request_packet_len);
+#endif
+
+#ifdef SIMULATE_PACKET_LOSS
+            // simulated random input packet LOSS
+            if ((rand() & 31) == 0) {
+                print(stderr, "Incoming packet lost!\n");
+                continue;
+            }
+#endif
+
+            // check the checksum, if any
+            if (cksumflag != 0) {
+                uint16_t cksum_remote, cksum_mine;
+                cksum_mine = bsd_checksum(
+                    &header->checksum + 1,
+                    request_packet_len - (reinterpret_cast<const uint8_t *>(&header->checksum + 1) -
+                                          reinterpret_cast<const uint8_t *>(header)));
+                cksum_remote = le16toh(header->checksum);
+                if (cksum_mine != cksum_remote) {
+                    print(
+                        stderr, "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n", cksum_mine, cksum_remote);
+                    continue;
+                }
+            } else {
+                const uint16_t recv_magic = le16toh(header->checksum);
+                if (recv_magic != DRIVE_PROTO_MAGIC) {
+                    print(stderr, "Bad MAGIC! Expected: 0x{:04X} Received: 0x{:04X}\n", DRIVE_PROTO_MAGIC, recv_magic);
+                    continue;
+                }
+            }
+
+            auto & reply_info = answer_cache.get_reply_info(sock.get_last_remote_ip(), sock.get_last_remote_port());
+            const int send_msg_len = process_request(reply_info, request_packet, request_packet_len);
+            // update reply cache entry
+            if (send_msg_len >= 0) {
+                reply_info.len = send_msg_len;
+                reply_info.timestamp = time(NULL);
+            } else {
+                reply_info.len = 0;
+            }
+
+#ifdef SIMULATE_PACKET_LOSS
+            // simulated random ouput packet LOSS
+            if ((rand() & 31) == 0) {
+                print(stderr, "Outgoing packet lost!\n");
+                continue;
+            }
+#endif
+
+            if (send_msg_len > 0) {
+                // fill in header
+                auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.packet.data());
+                header->length_flags = htole16(send_msg_len);
+                if (cksumflag != 0) {
+                    uint16_t checksum = bsd_checksum(
+                        &header->checksum + 1,
+                        send_msg_len -
+                            (reinterpret_cast<uint8_t *>(&header->checksum + 1) - reinterpret_cast<uint8_t *>(header)));
+                    header->checksum = htole16(checksum);
+                    header->length_flags |= htole16(0x8000);  // set the checksum flag
+                } else {
+                    header->checksum = htole16(DRIVE_PROTO_MAGIC);
+                    header->length_flags &= htole16(0x7FFF);  // zero the checksum flag
+                }
+#ifdef DEBUG
+                dbg_print("Sending back an answer of {} bytes\n", send_msg_len);
+                dump_packet(reply_info.packet.data(), send_msg_len);
+#endif
+                sock.can_send_data(10000);
+                auto sent_bytes = sock.send_reply(reply_info.packet.data(), send_msg_len);
+                if (sent_bytes != send_msg_len) {
+                    err_print("ERROR: reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
+                }
+            } else {
+                err_print("ERROR: Request ignored: Returned {}\n", send_msg_len);
+            }
+            dbg_print("--------------------------------\n\n");
         }
-        dbg_print("--------------------------------\n\n");
+    } catch (const std::runtime_error & ex) {
+        err_print("Exception: {}", ex.what());
     }
 
     return 0;
