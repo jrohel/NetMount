@@ -85,7 +85,7 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
 
         if (cur_item.path == path) {
             cur_item.last_used_time = now;
-            dbg_print("Found handle {} with path \"{}\" in cache\n", handle, path.native());
+            dbg_print("Found handle {} with path \"{}\" in cache\n", handle, path.string());
             return handle;
         }
 
@@ -93,7 +93,7 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
             if (!cur_item.directory_list.empty()) {
                 // Directory list is too old -> remove it from cache and free memory.
                 // It will be re-generated if necessary.
-                dbg_print("Remove old directory list for handle {} path \"{}\" from cache\n", handle, path.native());
+                dbg_print("Remove old directory list for handle {} path \"{}\" from cache\n", handle, path.string());
                 cur_item.directory_list = {};
             }
         }
@@ -133,7 +133,7 @@ int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset,
         throw std::runtime_error(std::format("Handle {} not found", handle));
     }
 
-    fd = fopen(fname.c_str(), "rb");
+    fd = fopen(fname.string().c_str(), "rb");
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
@@ -159,16 +159,16 @@ int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t 
 
     // len 0 means "truncate" or "extend"
     if (len == 0) {
-        dbg_print("truncate \"{}\" to {} bytes\n", fname.native(), offset);
-        if (truncate(fname.c_str(), offset) != 0) {
+        dbg_print("truncate \"{}\" to {} bytes\n", fname.string(), offset);
+        if (truncate(fname.string().c_str(), offset) != 0) {
             throw std::runtime_error(std::format("Cannot truncate file: {}", strerror(errno)));
         }
         return 0;
     }
 
     //  write to file
-    dbg_print("write {} bytes into file \"{}\" at offset {}\n", len, fname.native(), offset);
-    fd = fopen(fname.c_str(), "r+b");
+    dbg_print("write {} bytes into file \"{}\" at offset {}\n", len, fname.string(), offset);
+    fd = fopen(fname.string().c_str(), "r+b");
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
@@ -214,11 +214,11 @@ bool FilesystemDB::find_file(
     if ((nth == 0) || (items[handle].directory_list.empty())) {
         long count = items[handle].create_directory_list(use_fat_ioctl);
         if (count < 0) {
-            err_print("ERROR: Failed to scan dir \"{}\"\n", items[handle].path.native());
+            err_print("ERROR: Failed to scan dir \"{}\"\n", items[handle].path.string());
             return false;
 #ifdef DEBUG
         } else {
-            dbg_print("Scanned dir \"{}\", found {} items\n", items[handle].path.native(), count);
+            dbg_print("Scanned dir \"{}\", found {} items\n", items[handle].path.string(), count);
             for (const auto & item : items[handle].directory_list) {
                 dbg_print(
                     "  \"{:>11}\", attr 0x{:02X}, {} bytes\n",
@@ -332,7 +332,7 @@ fcb_file_name filename_to_fcb(const char * filename) noexcept {
 uint8_t get_path_dos_properties(
     const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] bool use_fat_ioctl) {
     struct stat statbuf;
-    if (stat(path.c_str(), &statbuf) != 0) {
+    if (stat(path.string().c_str(), &statbuf) != 0) {
         return FAT_ERROR_ATTR;  // error (probably doesn't exist)
     }
 
@@ -341,7 +341,7 @@ uint8_t get_path_dos_properties(
         auto it = path.end();
         while (it != path.begin() && (--it)->empty()) {
         }
-        properties->fcb_name = filename_to_fcb(it->c_str());
+        properties->fcb_name = filename_to_fcb(it->string().c_str());
 
         properties->time_date = time_to_fat(statbuf.st_mtime);
     }
@@ -369,13 +369,13 @@ uint8_t get_path_dos_properties(
     }
 
     // try to fetch DOS attributes from filesystem
-    auto fd = open(path.c_str(), O_RDONLY);
+    auto fd = open(path.string().c_str(), O_RDONLY);
     if (fd == -1) {
         return FAT_ERROR_ATTR;
     }
     uint32_t attr;
     if (ioctl(fd, FAT_IOCTL_GET_ATTRIBUTES, &attr) < 0) {
-        err_print("Failed to fetch attributes of \"{}\"\n", path.native());
+        err_print("Failed to fetch attributes of \"{}\"\n", path.string());
         close(fd);
         return 0;
     } else {
@@ -397,7 +397,7 @@ uint8_t get_path_dos_properties(
 void set_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe_unused]] uint8_t attrs) {
 #ifdef __linux__
     int fd, res;
-    fd = open(path.c_str(), O_RDONLY);
+    fd = open(path.string().c_str(), O_RDONLY);
     if (fd == -1) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
@@ -434,7 +434,7 @@ void change_dir(const std::filesystem::path & dir) { std::filesystem::current_pa
 
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl) {
     // try to create/truncate the file
-    FILE * const fd = fopen(path.c_str(), "wb");
+    FILE * const fd = fopen(path.string().c_str(), "wb");
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
@@ -445,7 +445,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
         try {
             set_item_attrs(path, attrs);
         } catch (const std::runtime_error & ex) {
-            err_print("Error: Failed to set attribute 0x{:02X} to \"{}\": {}\n", attrs, path.native(), ex.what());
+            err_print("Error: Failed to set attribute 0x{:02X} to \"{}\": {}\n", attrs, path.string(), ex.what());
         }
     }
 
@@ -458,7 +458,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
 void delete_files(const std::filesystem::path & pattern) {
     // test if pattern contains '?' characters
     bool is_pattern = false;
-    const std::string & pattern_string = pattern.native();
+    const std::string & pattern_string = pattern.string();
     for (auto ch : pattern_string) {
         if (ch == '?') {
             is_pattern = true;
@@ -480,7 +480,7 @@ void delete_files(const std::filesystem::path & pattern) {
 
     // if pattern, get directory and file parts and iterate over all directory
     const std::filesystem::path directory = pattern.parent_path();
-    const std::string filemask = pattern.filename();
+    const std::string filemask = pattern.filename().string();
 
     const auto filfcb = filename_to_fcb(filemask.c_str());
 
@@ -504,7 +504,7 @@ void delete_files(const std::filesystem::path & pattern) {
 
 
 bool rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name) noexcept {
-    return rename(old_name.c_str(), new_name.c_str()) == 0;
+    return rename(old_name.string().c_str(), new_name.string().c_str()) == 0;
 }
 
 
@@ -516,7 +516,7 @@ std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path) 
 
 bool is_on_fat([[maybe_unused]] const std::filesystem::path & path) {
 #ifdef __linux__
-    auto fd = open(path.c_str(), O_RDONLY);
+    auto fd = open(path.string().c_str(), O_RDONLY);
     if (fd == -1)
         return false;
     uint32_t volid;

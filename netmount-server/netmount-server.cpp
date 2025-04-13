@@ -223,20 +223,20 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             std::filesystem::path directory = share.get_root() / create_relative_path(request_data, request_data_len);
 
             if (function == INT2F_MAKE_DIR) {
-                dbg_print("MAKE_DIR \"{}\"\n", directory.native());
+                dbg_print("MAKE_DIR \"{}\"\n", directory.string());
                 try {
                     make_dir(directory);
                 } catch (const std::runtime_error & ex) {
                     *ax = to_little16(DOS_EXTERR_WRITE_FAULT);
-                    err_print("ERROR: MAKE_DIR \"{}\": {}\n", directory.native(), ex.what());
+                    err_print("ERROR: MAKE_DIR \"{}\": {}\n", directory.string(), ex.what());
                 }
             } else {
-                dbg_print("REMOVE_DIR \"{}\"\n", directory.native());
+                dbg_print("REMOVE_DIR \"{}\"\n", directory.string());
                 try {
                     delete_dir(directory);
                 } catch (const std::runtime_error & ex) {
                     *ax = to_little16(DOS_EXTERR_WRITE_FAULT);
-                    err_print("ERROR: REMOVE_DIR \"{}\": {}\n", directory.native(), ex.what());
+                    err_print("ERROR: REMOVE_DIR \"{}\": {}\n", directory.string(), ex.what());
                 }
             }
         } break;
@@ -244,12 +244,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         case INT2F_CHANGE_DIR: {
             std::filesystem::path directory = share.get_root() / create_relative_path(request_data, request_data_len);
 
-            dbg_print("CHANGE_DIR \"{}\"\n", directory.native());
+            dbg_print("CHANGE_DIR \"{}\"\n", directory.string());
             // Try to chdir to this dir
             try {
                 change_dir(directory);
             } catch (const std::runtime_error & ex) {
-                err_print("ERROR: CHANGE_DIR \"{}\": {}\n", directory.native(), ex.what());
+                err_print("ERROR: CHANGE_DIR \"{}\": {}\n", directory.string(), ex.what());
                 *ax = to_little16(DOS_EXTERR_PATH_NOT_FOUND);
             }
             break;
@@ -359,12 +359,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const std::filesystem::path path =
                 share.get_root() / create_relative_path(request_data + 1, request_data_len - 1);
 
-            dbg_print("SET_ATTRS on file \"{}\", attr: 0x{:02X}\n", path.native(), attrs);
+            dbg_print("SET_ATTRS on file \"{}\", attr: 0x{:02X}\n", path.string(), attrs);
             if (share.is_on_fat()) {
                 try {
                     set_item_attrs(path, attrs);
                 } catch (const std::runtime_error & ex) {
-                    err_print("ERROR: SET_ATTR 0x{:02X} to \"{}\": {}\n", attrs, path.native(), ex.what());
+                    err_print("ERROR: SET_ATTR 0x{:02X} to \"{}\": {}\n", attrs, path.string(), ex.what());
                     *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
                 }
             }
@@ -376,7 +376,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             }
             std::filesystem::path path = share.get_root() / create_relative_path(request_data, request_data_len);
 
-            dbg_print("GET_ATTRS on file \"{}\"\n", path.native());
+            dbg_print("GET_ATTRS on file \"{}\"\n", path.string());
             DosFileProperties properties;
             if (get_path_dos_properties(path, &properties, share.is_on_fat()) == FAT_ERROR_ATTR) {
                 dbg_print("no file found\n");
@@ -403,9 +403,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             if (request_data_len > path1_len) {
                 const auto path1 = share.get_root() / create_relative_path(request_data + 1, path1_len);
                 const auto path2 = share.get_root() / create_relative_path(request_data + 1 + path1_len, path2_len);
-                dbg_print("RENAME_FILE \"{}\" to \"{}\"\n", path1.native(), path2.native());
+                dbg_print("RENAME_FILE \"{}\" to \"{}\"\n", path1.string(), path2.string());
                 if (get_path_dos_properties(path2, NULL, 0) != FAT_ERROR_ATTR) {
-                    err_print("ERROR: RENAME_FILE: destination file \"{}\" already exists\n", path2.native());
+                    err_print("ERROR: RENAME_FILE: destination file \"{}\" already exists\n", path2.string());
                     *ax = to_little16(DOS_EXTERR_ACCESS_DENIED);
                 } else {
                     if (!rename_file(path1, path2))
@@ -418,7 +418,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
         case INT2F_DELETE_FILE: {
             std::filesystem::path path = share.get_root() / create_relative_path(request_data, request_data_len);
-            dbg_print("DELETE_FILE \"{}\"\n", path.native());
+            dbg_print("DELETE_FILE \"{}\"\n", path.string());
             if (get_path_dos_properties(path, NULL, share.is_on_fat()) & FAT_RO) {
                 *ax = to_little16(DOS_EXTERR_ACCESS_DENIED);
             } else {
@@ -440,11 +440,11 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
             std::filesystem::path search_template = create_relative_path(request_data + 1, request_data_len - 1);
             std::filesystem::path directory = share.get_root() / search_template.parent_path();
-            std::string filemask = search_template.filename();
+            std::string filemask = search_template.filename().string();
 
             auto filemaskfcb = filename_to_fcb(filemask.c_str());
             dbg_print(
-                "FIND_FIRST in \"{}\"\n filemask: \"{}\"\n attrs: 0x{:2X}\n", directory.native(), filemask, fattr);
+                "FIND_FIRST in \"{}\"\n filemask: \"{}\"\n attrs: 0x{:2X}\n", directory.string(), filemask, fattr);
             std::error_code ec;
             const bool is_root_dir = std::filesystem::equivalent(directory, share.get_root(), ec);
             if (ec) {
@@ -575,7 +575,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 share.get_root() / create_relative_path(request_data + 6, request_data_len - 6);
             const std::filesystem::path directory = share.get_root() / path.parent_path();
 
-            dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.native(), stack_attr);
+            dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
             std::error_code ec;
             if (!std::filesystem::is_directory(directory, ec)) {
                 if (ec) {
@@ -583,7 +583,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 } else {
                     err_print(
                         "ERROR: OPEN/CREATE/EXTENDED_OPEN_CREATE: Directory \"{}\" does not exist\n",
-                        directory.native());
+                        directory.string());
                 }
                 *ax = to_little16(DOS_EXTERR_PATH_NOT_FOUND);
             } else {
@@ -594,7 +594,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     DosFileProperties properties;
 
                     if (function == INT2F_OPEN_FILE) {
-                        dbg_print("OPEN_FILE \"{}\", stack_attr=0x{:04X}\n", path.native(), stack_attr);
+                        dbg_print("OPEN_FILE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
                         result_open_mode = stack_attr & 0xFF;
                         // check that item exists, and is neither a volume nor a directory
                         auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
@@ -602,14 +602,14 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             error = true;
                         }
                     } else if (function == INT2F_CREATE_FILE) {
-                        dbg_print("CREATE_FILE \"{}\", stack_attr=0x{:04X}\n", path.native(), stack_attr);
+                        dbg_print("CREATE_FILE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
                         properties = create_or_truncate_file(path, stack_attr & 0xFF, share.is_on_fat());
                         result_open_mode = 2;  // read/write
                     } else {
                         dbg_print(
                             "EXTENDED_OPEN_CREATE_FILE \"{}\", stack_attr=0x{:04X}, action_code=0x{:04X}, "
                             "open_mode=0x{:04X}\n",
-                            path.native(),
+                            path.string(),
                             stack_attr,
                             action_code,
                             ext_open_create_open_mode);
@@ -628,7 +628,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 error = true;
                             }
                         } else if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
-                            err_print("ERROR: Item \"{}\" is either a DIR or a VOL\n", path.native());
+                            err_print("ERROR: Item \"{}\" is either a DIR or a VOL\n", path.string());
                             error = true;
                         } else {
                             dbg_print("File exists already (attr 0x{:02X}) -> ", attr);
@@ -652,7 +652,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     } else {
                         // success (found a file, created it or truncated it)
                         auto handle = fs.get_handle(path);
-                        dbg_print("File \"{}\", handle {}\n", path.native(), handle);
+                        dbg_print("File \"{}\", handle {}\n", path.string(), handle);
                         dbg_print("    FCB file name: {}\n", fcb_file_name_to_cstr(properties.fcb_name));
                         dbg_print("    size: {}\n", properties.size);
                         dbg_print("    attrs: 0x{:02X}\n", properties.attrs);
