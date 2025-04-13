@@ -5,7 +5,6 @@
 
 #include "utils.hpp"
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #ifdef __linux__
@@ -271,21 +270,21 @@ bool FilesystemDB::find_file(
 
 int32_t FilesystemDB::Item::create_directory_list(bool use_fat_ioctl) {
     directory_list.clear();
-    DIR * dp = opendir(path.c_str());
-    if (!dp) {
-        return -1;
-    }
-    while (true) {
-        auto const * const dir_ent = readdir(dp);
-        if (!dir_ent) {
-            break;
+
+    for (const auto & dentry : std::filesystem::directory_iterator(path)) {
+        if (directory_list.empty()) {
+            for (const auto name : {".", ".."}) {
+                const auto fullpath = path / name;
+                DosFileProperties fprops;
+                get_path_dos_properties(fullpath, &fprops, use_fat_ioctl);
+                directory_list.emplace_back(fprops);
+            }
         }
-        auto fullpath = path / dir_ent->d_name;
         DosFileProperties fprops;
-        get_path_dos_properties(fullpath, &fprops, use_fat_ioctl);
+        get_path_dos_properties(dentry.path(), &fprops, use_fat_ioctl);
         directory_list.emplace_back(fprops);
     }
-    closedir(dp);
+
     return directory_list.size();
 }
 
@@ -429,9 +428,7 @@ void delete_dir(const std::filesystem::path & dir) {
 }
 
 
-void change_dir(const std::filesystem::path & dir) {
-    std::filesystem::current_path(dir);
-}
+void change_dir(const std::filesystem::path & dir) { std::filesystem::current_path(dir); }
 
 
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl) {
@@ -457,7 +454,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
 }
 
 
-int delete_files(const std::filesystem::path & pattern) {
+void delete_files(const std::filesystem::path & pattern) {
     // test if pattern contains '?' characters
     bool is_pattern = false;
     const std::string & pattern_string = pattern.native();
@@ -470,11 +467,14 @@ int delete_files(const std::filesystem::path & pattern) {
 
     // if regular file, delete it right away
     if (!is_pattern) {
-        if (unlink(pattern.c_str()) != 0) {
-            err_print("Error: failure to delete file \"{}\": {}\n", pattern.native(), strerror(errno));
-            return -1;
+        if (!std::filesystem::exists(pattern)) {
+            throw std::runtime_error("delete_files: File does not exist: " + pattern.string());
         }
-        return 1;
+        if (std::filesystem::is_directory(pattern)) {
+            throw std::runtime_error("delete_files: Is a directory: " + pattern.string());
+        }
+        std::filesystem::remove(pattern);
+        return;
     }
 
     // if pattern, get directory and file parts and iterate over all directory
@@ -482,29 +482,23 @@ int delete_files(const std::filesystem::path & pattern) {
     const std::string filemask = pattern.filename();
 
     const auto filfcb = filename_to_fcb(filemask.c_str());
-    // iterate over the directory and delete whatever is matching the pattern
-    DIR * const dp = opendir(directory.c_str());
-    if (!dp) {
-        return -1;
-    }
-    while (true) {
-        auto const * const dir_ent = readdir(dp);
-        if (!dir_ent)
-            break;
-        // skip directories
-        if (dir_ent->d_type == DT_DIR)
+
+    // iterate over the directory and delete files that match the pattern
+    for (const auto & dentry : std::filesystem::directory_iterator(directory)) {
+        if (dentry.is_directory()) {
+            // skip directories
             continue;
-        // if match, delete the file and continue
-        auto dirnamefcb = filename_to_fcb(dir_ent->d_name);
-        if (match_fcb_name_to_mask(filfcb, dirnamefcb)) {
-            auto fname = directory / dir_ent->d_name;
-            if (unlink(fname.c_str()) == -1)
-                err_print("ERROR: Failed to delete file \"{}\": {}\n", fname.native(), strerror(errno));
+        }
+
+        // if match, delete the file
+        const auto & path_str = dentry.path().string();
+        if (match_fcb_name_to_mask(filfcb, filename_to_fcb(path_str.c_str()))) {
+            std::error_code ec;
+            if (!std::filesystem::remove(dentry.path(), ec)) {
+                err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
+            }
         }
     }
-    closedir(dp);
-
-    return 0;
 }
 
 

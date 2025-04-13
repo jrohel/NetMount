@@ -421,8 +421,13 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             dbg_print("DELETE_FILE \"{}\"\n", path.native());
             if (get_path_dos_properties(path, NULL, share.is_on_fat()) & FAT_RO) {
                 *ax = to_little16(DOS_EXTERR_ACCESS_DENIED);
-            } else if (delete_files(path) < 0) {
-                *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
+            } else {
+                try {
+                    delete_files(path);
+                } catch (const std::runtime_error & ex) {
+                    err_print("ERROR: DELETE_FILE: {}\n", ex.what());
+                    *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
+                }
             }
         } break;
 

@@ -125,8 +125,8 @@ void change_dir(const std::filesystem::path & dir);
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl);
 
 // Removes all files matching the pattern
-// Returns the number of removed files, or -1 on error or if no matching file found
-int delete_files(const std::filesystem::path & pattern);
+// Throws exception on error or if no matching file found
+void delete_files(const std::filesystem::path & pattern);
 
 // Renames `old_name` to `new_name`
 // Returns `true` on success
