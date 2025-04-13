@@ -224,15 +224,19 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
             if (function == INT2F_MAKE_DIR) {
                 dbg_print("MAKE_DIR \"{}\"\n", directory.native());
-                if (!make_dir(directory)) {
+                try {
+                    make_dir(directory);
+                } catch (const std::runtime_error & ex) {
                     *ax = to_little16(DOS_EXTERR_WRITE_FAULT);
-                    err_print("ERROR: MAKE_DIR \"{}\": {}\n", directory.native(), strerror(errno));
+                    err_print("ERROR: MAKE_DIR \"{}\": {}\n", directory.native(), ex.what());
                 }
             } else {
                 dbg_print("REMOVE_DIR \"{}\"\n", directory.native());
-                if (!delete_dir(directory)) {
+                try {
+                    delete_dir(directory);
+                } catch (const std::runtime_error & ex) {
                     *ax = to_little16(DOS_EXTERR_WRITE_FAULT);
-                    err_print("ERROR: REMOVE_DIR \"{}\": {}\n", directory.native(), strerror(errno));
+                    err_print("ERROR: REMOVE_DIR \"{}\": {}\n", directory.native(), ex.what());
                 }
             }
         } break;
@@ -242,8 +246,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
             dbg_print("CHANGE_DIR \"{}\"\n", directory.native());
             // Try to chdir to this dir
-            if (!change_dir(directory)) {
-                err_print("ERROR: CHANGE_DIR \"{}\": {}\n", directory.native(), strerror(errno));
+            try {
+                change_dir(directory);
+            } catch (const std::runtime_error & ex) {
+                err_print("ERROR: CHANGE_DIR \"{}\": {}\n", directory.native(), ex.what());
                 *ax = to_little16(DOS_EXTERR_PATH_NOT_FOUND);
             }
             break;

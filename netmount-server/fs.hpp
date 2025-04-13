@@ -107,17 +107,17 @@ uint8_t get_path_dos_properties(const std::filesystem::path & path, DosFilePrope
 // Throws exception on error.
 void set_item_attrs(const std::filesystem::path & path, uint8_t attrs);
 
-// Creates directory
-// Returns `true` on success
-bool make_dir(const std::filesystem::path & dir) noexcept;
+// Creates directory `dir`
+// Throws exception on error.
+void make_dir(const std::filesystem::path & dir);
 
-// Removes directory
-// Returns `true` on success
-bool delete_dir(const std::filesystem::path & dir) noexcept;
+// Removes directory `dir`
+// Throws exception on error.
+void delete_dir(const std::filesystem::path & dir);
 
-// Changes to directory
-// Returns `true` on success
-bool change_dir(const std::filesystem::path & dir) noexcept;
+// Changes the current working directory to `dir`
+// Throws exception on error.
+void change_dir(const std::filesystem::path & dir);
 
 // Creates or truncates a file `path` with attributes `attrs`.
 // Returns properties of created/truncated file.

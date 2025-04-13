@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <exception>
 #include <format>
 #include <string>
 
@@ -410,15 +411,27 @@ void set_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe
 }
 
 
-bool make_dir(const std::filesystem::path & dir) noexcept {
-    return mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == 0;
+void make_dir(const std::filesystem::path & dir) {
+    if (!std::filesystem::create_directory(dir)) {
+        throw std::runtime_error("make_dir: Directory exists: " + dir.string());
+    }
 }
 
 
-bool delete_dir(const std::filesystem::path & dir) noexcept { return rmdir(dir.c_str()) == 0; }
+void delete_dir(const std::filesystem::path & dir) {
+    if (!std::filesystem::exists(dir)) {
+        throw std::runtime_error("delete_dir: Directory does not exist: " + dir.string());
+    }
+    if (!std::filesystem::is_directory(dir)) {
+        throw std::runtime_error("delete_dir: Not a directory: " + dir.string());
+    }
+    std::filesystem::remove(dir);
+}
 
 
-bool change_dir(const std::filesystem::path & d) noexcept { return chdir(d.c_str()) == 0; }
+void change_dir(const std::filesystem::path & dir) {
+    std::filesystem::current_path(dir);
+}
 
 
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl) {
