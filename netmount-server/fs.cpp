@@ -6,10 +6,11 @@
 #include "utils.hpp"
 
 #include <errno.h>
-#include <fcntl.h>
 #ifdef __linux__
+#include <fcntl.h>
 #include <linux/msdos_fs.h>
 #endif
+#include <stdio.h>
 #include <string.h>
 #ifdef __linux__
 #include <sys/ioctl.h>
