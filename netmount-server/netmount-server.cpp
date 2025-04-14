@@ -135,7 +135,9 @@ sig_atomic_t volatile exit_flag = 0;
 void signal_handler(int sig_number) {
     switch (sig_number) {
         case SIGINT:
+#ifdef SIGQUIT
         case SIGQUIT:
+#endif
         case SIGTERM:
             exit_flag = 1;
             break;
@@ -847,7 +849,9 @@ int main(int argc, char ** argv) {
 
     // setup signals handler
     signal(SIGTERM, signal_handler);
+#ifdef SIGQUIT
     signal(SIGQUIT, signal_handler);
+#endif
     signal(SIGINT, signal_handler);
 
     // Print table with shared drives
