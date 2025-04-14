@@ -440,8 +440,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto * const request = reinterpret_cast<const drive_proto_find_first *>(request_data);
             unsigned fattr = request->attrs;
 
-            std::filesystem::path search_template = create_relative_path(request_data + 1, request_data_len - 1);
-            std::filesystem::path directory = share.get_root() / search_template.parent_path();
+            auto search_template = create_relative_path(request_data + 1, request_data_len - 1);
+            auto search_template_parent = search_template.parent_path();
+            auto directory = search_template_parent.empty() ? share.get_root() : share.get_root() / search_template_parent;
             std::string filemask = search_template.filename().string();
 
             auto filemaskfcb = filename_to_fcb(filemask.c_str());
