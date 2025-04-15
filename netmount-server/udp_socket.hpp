@@ -17,7 +17,6 @@ public:
 
     void bind(const char * local_ip, std::uint16_t local_port);
     WaitResult wait_for_data(std::uint16_t timeout_ms);
-    WaitResult can_send_data(std::uint16_t timeout_ms);
     std::uint16_t receive(void * buffer, size_t buffer_size);
     std::uint16_t send_reply(const void * buffer, size_t data_len);
     std::uint32_t get_last_remote_ip() const;

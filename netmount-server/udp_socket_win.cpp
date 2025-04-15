@@ -76,27 +76,6 @@ public:
         return WaitResult::READY;
     }
 
-    WaitResult can_send_data(uint16_t timeout_ms) {
-        timeval timeout;
-        timeout.tv_sec = timeout_ms / 1000;
-        timeout.tv_usec = static_cast<uint32_t>(timeout_ms % 1000) * 1000;
-
-        fd_set write_set;
-        FD_ZERO(&write_set);
-        FD_SET(sock, &write_set);
-
-        const auto select_ret = select(0, NULL, &write_set, NULL, &timeout);
-        if (select_ret == SOCKET_ERROR) {
-            throw_error("UdpSocket::can_send_data: select()", WSAGetLastError());
-        }
-
-        if (select_ret == 0) {
-            return WaitResult::TIMEOUT;
-        }
-
-        return WaitResult::READY;
-    }
-
     uint16_t receive(void * buffer, size_t bufferSize) {
         socklen_t addr_len = sizeof(last_remote_addr);
         const auto bytes_received = recvfrom(
@@ -176,8 +155,6 @@ UdpSocket::~UdpSocket() = default;
 void UdpSocket::bind(const char * local_ip, uint16_t local_port) { p_impl->bind(local_ip, local_port); }
 
 UdpSocket::WaitResult UdpSocket::wait_for_data(uint16_t timeout_ms) { return p_impl->wait_for_data(timeout_ms); }
-
-UdpSocket::WaitResult UdpSocket::can_send_data(uint16_t timeout_ms) { return p_impl->can_send_data(timeout_ms); }
 
 uint16_t UdpSocket::receive(void * buffer, size_t buffer_size) { return p_impl->receive(buffer, buffer_size); }
 

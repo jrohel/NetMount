@@ -1033,7 +1033,6 @@ int main(int argc, char ** argv) {
                 dbg_print("Sending back an answer of {} bytes\n", send_msg_len);
                 dump_packet(reply_info.packet.data(), send_msg_len);
 #endif
-                sock.can_send_data(10000);
                 auto sent_bytes = sock.send_reply(reply_info.packet.data(), send_msg_len);
                 if (sent_bytes != send_msg_len) {
                     err_print("ERROR: reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
