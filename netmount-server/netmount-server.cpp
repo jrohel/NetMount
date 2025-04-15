@@ -127,10 +127,11 @@ ReplyCache::ReplyInfo & ReplyCache::get_reply_info(uint32_t ipv4_addr, uint16_t 
 Shares shares;
 ReplyCache answer_cache;
 FilesystemDB fs;
-
+UdpSocket * udp_socket_ptr{nullptr};
 
 // the flag is set when netmount-server is expected to terminate
 sig_atomic_t volatile exit_flag = 0;
+
 
 void signal_handler(int sig_number) {
     switch (sig_number) {
@@ -140,6 +141,9 @@ void signal_handler(int sig_number) {
 #endif
         case SIGTERM:
             exit_flag = 1;
+            if (udp_socket_ptr) {
+                udp_socket_ptr->signal_stop();
+            }
             break;
         default:
             break;
@@ -848,6 +852,8 @@ int main(int argc, char ** argv) {
     UdpSocket sock;
     sock.bind(bind_addr.c_str(), bind_port);
 
+    udp_socket_ptr = &sock;
+
     // setup signals handler
     signal(SIGTERM, signal_handler);
 #ifdef SIGQUIT
@@ -1045,6 +1051,15 @@ int main(int argc, char ** argv) {
     } catch (const std::runtime_error & ex) {
         err_print("Exception: {}", ex.what());
     }
+
+    // setup default signal handlers
+    signal(SIGTERM, SIG_DFL);
+#ifdef SIGQUIT
+    signal(SIGQUIT, SIG_DFL);
+#endif
+    signal(SIGINT, SIG_DFL);
+
+    udp_socket_ptr = nullptr;
 
     return 0;
 }
