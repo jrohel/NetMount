@@ -156,7 +156,7 @@ private:
             (LPSTR)&msg_buffer,
             0,
             nullptr);
-        std::string message = msg_buffer ? msg_buffer : "Unknown error";
+        const std::string message = msg_buffer ? msg_buffer : "Unknown error";
         LocalFree(msg_buffer);
         return message;
     }

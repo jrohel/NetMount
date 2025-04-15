@@ -71,7 +71,7 @@ public:
 
     std::uint16_t receive(void * buffer, size_t buffer_size) {
         socklen_t addr_len = sizeof(last_remote_addr);
-        auto bytes_received =
+        const auto bytes_received =
             recvfrom(sock, buffer, buffer_size, 0, reinterpret_cast<sockaddr *>(&last_remote_addr), &addr_len);
         if (bytes_received == -1) {
             throw_error("UdpSocket::receieve: recvfrom()", errno);
@@ -80,7 +80,7 @@ public:
     }
 
     std::uint16_t send_reply(const void * buffer, size_t data_len) {
-        auto sent_bytes = sendto(
+        const auto sent_bytes = sendto(
             sock, buffer, data_len, 0, reinterpret_cast<const sockaddr *>(&last_remote_addr), sizeof(last_remote_addr));
         if (sent_bytes == -1) {
             throw_error("UdpSocket::send_reply: sendto()", errno);

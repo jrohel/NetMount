@@ -77,7 +77,7 @@ uint32_t time_to_fat(time_t t) {
 uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
     uint16_t first_free = items.size();
     uint16_t oldest = 0;
-    time_t now = time(NULL);
+    const time_t now = time(NULL);
 
     // see if not already in cache
     for (uint16_t handle = 0; handle < items.size(); ++handle) {
@@ -212,7 +212,7 @@ bool FilesystemDB::find_file(
 
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (items[handle].directory_list.empty())) {
-        long count = items[handle].create_directory_list(use_fat_ioctl);
+        const auto count = items[handle].create_directory_list(use_fat_ioctl);
         if (count < 0) {
             err_print("ERROR: Failed to scan dir \"{}\"\n", items[handle].path.string());
             return false;
@@ -230,9 +230,9 @@ bool FilesystemDB::find_file(
         }
     }
 
-    DosFileProperties * found_props{nullptr};
+    DosFileProperties const * found_props{nullptr};
     uint16_t n = 0;
-    for (auto & item_props : items[handle].directory_list) {
+    for (const auto & item_props : items[handle].directory_list) {
         // forward to where we need to start listing
         if (++n <= nth) {
             continue;

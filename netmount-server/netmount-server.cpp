@@ -226,7 +226,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     switch (function) {
         case INT2F_REMOVE_DIR:
         case INT2F_MAKE_DIR: {
-            std::filesystem::path directory = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto directory = share.get_root() / create_relative_path(request_data, request_data_len);
 
             if (function == INT2F_MAKE_DIR) {
                 dbg_print("MAKE_DIR \"{}\"\n", directory.string());
@@ -248,7 +248,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         } break;
 
         case INT2F_CHANGE_DIR: {
-            std::filesystem::path directory = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto directory = share.get_root() / create_relative_path(request_data, request_data_len);
 
             dbg_print("CHANGE_DIR \"{}\"\n", directory.string());
             // Try to chdir to this dir
@@ -311,7 +311,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     handle,
                     offset,
                     request_data_len - sizeof(drive_proto_writef));
-                auto reply = reinterpret_cast<drive_proto_writef_reply *>(reply_data);
+                auto * const reply = reinterpret_cast<drive_proto_writef_reply *>(reply_data);
                 reply->written = to_little16(write_len);
                 reply_packet_len = sizeof(drive_proto_writef_reply);
             } catch (const std::runtime_error & ex) {
@@ -349,7 +349,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             // AX: media id (8 bits) | sectors per cluster (8 bits)
             // etherdfs says: MSDOS tolerates only 1 here!
             *ax = to_little16(1);
-            auto * reply = reinterpret_cast<drive_proto_disk_info_reply *>(reply_data);
+            auto * const reply = reinterpret_cast<drive_proto_disk_info_reply *>(reply_data);
             reply->total_clusters = to_little16(fs_size >> 15);  // 32K clusters
             reply->bytes_per_sector = to_little16(32768);
             reply->available_clusters = to_little16(free_space >> 15);  // 32K clusters
@@ -380,7 +380,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             if (request_data_len == 0) {
                 return -1;
             }
-            std::filesystem::path path = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto path = share.get_root() / create_relative_path(request_data, request_data_len);
 
             dbg_print("GET_ATTRS on file \"{}\"\n", path.string());
             DosFileProperties properties;
@@ -389,7 +389,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
             } else {
                 dbg_print("found {} bytes, attr 0x{:02X}\n", properties.size, properties.attrs);
-                auto reply = reinterpret_cast<drive_proto_get_attrs_reply *>(reply_data);
+                auto * const reply = reinterpret_cast<drive_proto_get_attrs_reply *>(reply_data);
                 reply->time = to_little16(properties.time_date);
                 reply->date = to_little16(properties.time_date >> 16);
                 reply->size_lo = to_little16(properties.size);
@@ -423,7 +423,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         } break;
 
         case INT2F_DELETE_FILE: {
-            std::filesystem::path path = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto path = share.get_root() / create_relative_path(request_data, request_data_len);
             dbg_print("DELETE_FILE \"{}\"\n", path.string());
             if (get_path_dos_properties(path, NULL, share.is_on_fat()) & FAT_RO) {
                 *ax = to_little16(DOS_EXTERR_ACCESS_DENIED);
@@ -442,14 +442,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 return -1;
             }
             auto * const request = reinterpret_cast<const drive_proto_find_first *>(request_data);
-            unsigned fattr = request->attrs;
+            const uint8_t fattr = request->attrs;
 
-            auto search_template = create_relative_path(request_data + 1, request_data_len - 1);
-            auto search_template_parent = search_template.parent_path();
-            auto directory = search_template_parent.empty() ? share.get_root() : share.get_root() / search_template_parent;
-            std::string filemask = search_template.filename().string();
+            const auto search_template = create_relative_path(request_data + 1, request_data_len - 1);
+            const auto search_template_parent = search_template.parent_path();
+            const auto directory =
+                search_template_parent.empty() ? share.get_root() : share.get_root() / search_template_parent;
+            const std::string filemask = search_template.filename().string();
 
-            auto filemaskfcb = filename_to_fcb(filemask.c_str());
+            const auto filemaskfcb = filename_to_fcb(filemask.c_str());
             dbg_print(
                 "FIND_FIRST in \"{}\"\n filemask: \"{}\"\n attrs: 0x{:2X}\n", directory.string(), filemask, fattr);
             std::error_code ec;
@@ -475,7 +476,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     "Found file: FCB \"{}\", attrs 0x{:02X}\n",
                     fcb_file_name_to_cstr(properties.fcb_name),
                     properties.attrs);
-                auto reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
+                auto * const reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
                 reply->attrs = properties.attrs;
                 reply->name = properties.fcb_name;
                 reply->time = to_little16(properties.time_date);
@@ -492,10 +493,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 return -1;
             }
             auto * const request = reinterpret_cast<const drive_proto_find_next *>(request_data);
-            uint16_t handle = from_little16(request->cluster);
+            const uint16_t handle = from_little16(request->cluster);
             uint16_t fpos = from_little16(request->dir_entry);
-            uint8_t fattr = request->attrs;
-            const fcb_file_name * fcbmask = &request->search_template;
+            const uint8_t fattr = request->attrs;
+            fcb_file_name const * const fcbmask = &request->search_template;
             dbg_print(
                 "FIND_NEXT looks for {} file in dir handle {}\n fcbmask: \"{}\"\n attrs: 0x{:2X}\n",
                 fpos,
@@ -524,7 +525,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     "Found file: FCB \"{}\", attrs 0x{:02X}\n",
                     fcb_file_name_to_cstr(properties.fcb_name),
                     properties.attrs);
-                auto reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
+                auto * const reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
                 reply->attrs = properties.attrs;
                 reply->name = properties.fcb_name;
                 reply->time = to_little16(properties.time_date);
@@ -544,7 +545,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             // translate a "seek from end" offset into an "seek from start" offset
             int32_t offset = from_little16(request->offset_from_end_hi);
             offset = (offset << 16) + from_little16(request->offset_from_end_lo);
-            uint16_t handle = from_little16(request->start_cluster);
+            const uint16_t handle = from_little16(request->start_cluster);
             dbg_print("SEEK_FROM_END on file handle {}, offset {}\n", handle, offset);
             // if the offset is positive, zero it
             if (offset > 0) {
@@ -561,7 +562,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     offset = 0;
                 }
                 dbg_print("File handle {}, size {} bytes, new offset {}\n", handle, fsize, offset);
-                auto * reply = reinterpret_cast<drive_proto_seek_from_end_reply *>(reply_data);
+                auto * const reply = reinterpret_cast<drive_proto_seek_from_end_reply *>(reply_data);
                 reply->position_lo = to_little16(offset);
                 reply->position_hi = to_little16(offset >> 16);
                 reply_packet_len = sizeof(drive_proto_seek_from_end_reply);
@@ -574,13 +575,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             // OPEN is only about "does this file exist", and CREATE "create or truncate this file",
             // EXTENDED_OPEN_CREATE is a combination of both with extra flags
             auto * const request = reinterpret_cast<const drive_proto_open_create *>(request_data);
-            uint16_t stack_attr = from_little16(request->attrs);
-            uint16_t action_code = from_little16(request->action);
-            uint16_t ext_open_create_open_mode = from_little16(request->mode);
+            const uint16_t stack_attr = from_little16(request->attrs);
+            const uint16_t action_code = from_little16(request->action);
+            const uint16_t ext_open_create_open_mode = from_little16(request->mode);
 
-            std::filesystem::path path =
-                share.get_root() / create_relative_path(request_data + 6, request_data_len - 6);
-            const std::filesystem::path directory = share.get_root() / path.parent_path();
+            const auto path = share.get_root() / create_relative_path(request_data + 6, request_data_len - 6);
+            const auto directory = share.get_root() / path.parent_path();
 
             dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
             std::error_code ec;
@@ -604,7 +604,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         dbg_print("OPEN_FILE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
                         result_open_mode = stack_attr & 0xFF;
                         // check that item exists, and is neither a volume nor a directory
-                        auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
+                        const auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
                         if (attr == 0xFF || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
                             error = true;
                         }
@@ -621,7 +621,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             action_code,
                             ext_open_create_open_mode);
 
-                        auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
+                        const auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
                         result_open_mode =
                             ext_open_create_open_mode & 0x7f;  // etherdfs says: that's what PHANTOM.C does
                         if (attr == FAT_ERROR_ATTR) {          // file not found
@@ -658,7 +658,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
                     } else {
                         // success (found a file, created it or truncated it)
-                        auto handle = fs.get_handle(path);
+                        const auto handle = fs.get_handle(path);
                         dbg_print("File \"{}\", handle {}\n", path.string(), handle);
                         dbg_print("    FCB file name: {}\n", fcb_file_name_to_cstr(properties.fcb_name));
                         dbg_print("    size: {}\n", properties.size);
@@ -668,7 +668,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             err_print("ERROR: Failed to get file handle\n");
                             return -1;
                         }
-                        auto reply = reinterpret_cast<drive_proto_open_create_reply *>(reply_data);
+                        auto * const reply = reinterpret_cast<drive_proto_open_create_reply *>(reply_data);
                         reply->attrs = properties.attrs;
                         reply->name = properties.fcb_name;
                         reply->date_time = to_little32(properties.time_date);
@@ -922,7 +922,7 @@ int main(int argc, char ** argv) {
             }
 
             // check the protocol version
-            auto * header = reinterpret_cast<const drive_proto_hdr *>(request_packet);
+            auto * const header = reinterpret_cast<const drive_proto_hdr *>(request_packet);
             if (header->version != DRIVE_PROTO_VERSION) {
                 err_print(
                     "ERROR: unsupported protocol version {:d} from {}:{}\n",
@@ -983,12 +983,11 @@ int main(int argc, char ** argv) {
 
             // check the checksum, if any
             if (cksumflag != 0) {
-                uint16_t cksum_remote, cksum_mine;
-                cksum_mine = bsd_checksum(
+                const uint16_t cksum_mine = bsd_checksum(
                     &header->checksum + 1,
                     request_packet_len - (reinterpret_cast<const uint8_t *>(&header->checksum + 1) -
                                           reinterpret_cast<const uint8_t *>(header)));
-                cksum_remote = from_little16(header->checksum);
+                const uint16_t cksum_remote = from_little16(header->checksum);
                 if (cksum_mine != cksum_remote) {
                     print(
                         stderr, "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n", cksum_mine, cksum_remote);
@@ -1025,7 +1024,7 @@ int main(int argc, char ** argv) {
                 auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.packet.data());
                 header->length_flags = to_little16(send_msg_len);
                 if (cksumflag != 0) {
-                    uint16_t checksum = bsd_checksum(
+                    const uint16_t checksum = bsd_checksum(
                         &header->checksum + 1,
                         send_msg_len -
                             (reinterpret_cast<uint8_t *>(&header->checksum + 1) - reinterpret_cast<uint8_t *>(header)));
@@ -1039,7 +1038,7 @@ int main(int argc, char ** argv) {
                 dbg_print("Sending back an answer of {} bytes\n", send_msg_len);
                 dump_packet(reply_info.packet.data(), send_msg_len);
 #endif
-                auto sent_bytes = sock.send_reply(reply_info.packet.data(), send_msg_len);
+                const auto sent_bytes = sock.send_reply(reply_info.packet.data(), send_msg_len);
                 if (sent_bytes != send_msg_len) {
                     err_print("ERROR: reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
                 }
