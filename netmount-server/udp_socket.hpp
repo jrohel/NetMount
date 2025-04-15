@@ -23,6 +23,10 @@ public:
     const std::string & get_last_remote_ip_str() const;
     std::uint16_t get_last_remote_port() const;
 
+    // The POSIX implementation does nothing.
+    // Non-POSIX implementations may close the socket and terminate the ongoing `select`, `recvfrom`, and `sendto`.
+    void signal_stop();
+
 private:
     class Impl;
     std::unique_ptr<Impl> p_impl;

@@ -129,3 +129,5 @@ std::uint32_t UdpSocket::get_last_remote_ip() const { return p_impl->get_last_re
 const std::string & UdpSocket::get_last_remote_ip_str() const { return p_impl->get_last_remote_ip_str(); }
 
 uint16_t UdpSocket::get_last_remote_port() const { return p_impl->get_last_remote_port(); }
+
+void UdpSocket::signal_stop() {}

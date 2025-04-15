@@ -9,6 +9,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <atomic>
 #include <stdexcept>
 
 // Microsoft example says: Need to link with Ws2_32.lib
@@ -32,7 +33,7 @@ public:
     }
 
     ~Impl() {
-        closesocket(sock);
+        signal_stop();
         WSACleanup();
     }
 
@@ -64,9 +65,12 @@ public:
         FD_SET(sock, &read_set);
 
         const auto select_ret = select(0, &read_set, NULL, NULL, &timeout);
-
         if (select_ret == SOCKET_ERROR) {
             throw_error("UdpSocket::wait_for_data: select()", WSAGetLastError());
+        }
+
+        if (signaled.test()) {
+            return WaitResult::SIGNAL;
         }
 
         if (select_ret == 0) {
@@ -87,6 +91,9 @@ public:
             &addr_len);
 
         if (bytes_received == SOCKET_ERROR) {
+            if (signaled.test()) {
+                throw_error("UdpSocket::receive: recvfrom(): Stop signal caught");
+            }
             throw_error("UdpSocket::receieve: recvfrom()", WSAGetLastError());
         }
 
@@ -103,6 +110,9 @@ public:
             sizeof(last_remote_addr));
 
         if (sent_bytes == SOCKET_ERROR) {
+            if (signaled.test()) {
+                throw_error("UdpSocket::send_reply: sendto(): Stop signal caught");
+            }
             throw_error("UdpSocket::send_reply: sendto()", WSAGetLastError());
         }
 
@@ -122,10 +132,19 @@ public:
 
     uint16_t get_last_remote_port() const { return ntohs(last_remote_addr.sin_port); }
 
+    void signal_stop() {
+        if (signaled.test_and_set()) {
+            return;
+        }
+        closesocket(sock);
+        sock = INVALID_SOCKET;
+    }
+
 private:
     SOCKET sock;
     sockaddr_in last_remote_addr{};
     mutable std::string last_remote_ip{};
+    std::atomic_flag signaled{};
 
     static std::string get_WSA_error_message(int error_code) {
         char * msg_buffer = nullptr;
@@ -145,6 +164,8 @@ private:
     [[noreturn]] static void throw_error(const std::string & context, int error_code) {
         throw std::runtime_error(context + ": " + get_WSA_error_message(error_code));
     }
+
+    [[noreturn]] static void throw_error(const std::string & message) { throw std::runtime_error(message); }
 };
 
 
@@ -165,3 +186,5 @@ std::uint32_t UdpSocket::get_last_remote_ip() const { return p_impl->get_last_re
 const std::string & UdpSocket::get_last_remote_ip_str() const { return p_impl->get_last_remote_ip_str(); }
 
 uint16_t UdpSocket::get_last_remote_port() const { return p_impl->get_last_remote_port(); }
+
+void UdpSocket::signal_stop() { p_impl->signal_stop(); }
