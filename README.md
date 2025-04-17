@@ -1,19 +1,21 @@
 # NetMount
 -----------
-NetMount allows DOS to mount directories from remote computers as network drives. It consists of two programs.
+**NetMount** enables DOS systems to access shared directories from remote machines as if they were local drives. It operates over the UDP protocol. The DOS client supports any interface for which a DOS Packet Driver class 1 (Ethernet II) exists, including Ethernet network adapters, serial, parallel, and other hardware interfaces. NetMount is optimized for low-resource environments, making it suitable for retro computing, embedded platforms, and legacy system integration.
 
-- **`netmount`**: Driver (TSR program) for DOS, which allows to mount and unmount remote directories as network drives.
-- **`netmount-server`**: Program for Linux (but can be adapted for other operating systems), which shares directories as drives.
+It consist of two components:
+
+- **`netmount`**: A lightweight TSR (Terminate and Stay Resident) driver for DOS that allows access to remote directories as standard network drives.
+- **`netmount-server`**: A cross-platform server application for POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows, designed to share directories with DOS clients over the network.
 
 -----
-## `netmount`
-- DOS client (driver)
-- Allows to mount and unmount remote directories from multiple servers without rebooting.
-- Has minimal dependencies, only needs DOS Packet Driver.
-- Implements Ethernet Type II frame, ARP, IPv4, UDP and its own NetMount protocol.
-- It works over Ethernet, but if using the appropriate packet driver, it also works over other devices. For example, over a serial port using SLIP.
+## `netmount` (DOS Client)
+- A TSR driver for DOS that allows mounting shared directories from one or more remote machines as local drives.
 - It should work with MS-DOS 5.0 and newer and with sufficiently compatible systems such as FreeDOS.
-- Written in C99 and assembler for Open Watcom v2 compiler.
+- Has minimal dependencies — only a DOS Packet Driver class 1 (Ethernet II) is required.
+- Implements Ethernet Type II frame, ARP, IPv4, UDP and its own NetMount protocol.
+- Supports any network interface for which a DOS Packet Driver class 1 (Ethernet II) is available. This includes Ethernet adapters, as well as serial, parallel, and other interfaces supported through appropriate drivers.
+- Does not require a system reboot when mounting additional or unmounting drives.
+- Written in C99 and assembler for the Open Watcom v2 compiler.
 
 ### Usage:
 ```
@@ -55,13 +57,14 @@ Arguments:
 ```
 
 -----
-## `netmount-server`
-- A directory sharing server. It is written for Linux, but can be adapted for other operating systems.
-- Allows to share directories as drives.
-- Allows listening on different IP addresses and UDP ports. This allows to run multiple instances on the server with different configurations.
-- It can run under a regular unprivileged user.
-- It is CPU architecture independent. I am currently developing it on x86-64, but it should work on other architectures as well. Both little and big endian architectures are supported.
-- Written in C++20. Tested compilation using GCC and Clang.
+## `netmount-server` (Directory Sharing Server)
+- A cross-platform user-space application that shares directories over the network.
+- Supports POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows.
+- Can run as a non-root/unprivileged user.
+- Supports multiple simultaneous instances, each with unique IP/port bindings.
+- CPU architecture independent. Although it is currently developed on x86-64, the application is designed to be portable and should work on other architectures. It supports both little-endian and big-endian systems.
+- Written in C++20. Tested with GCC and Clang.
+
 
 ### Usage:
 ```
@@ -76,14 +79,32 @@ Options:
 ```
 
 -----
-## Backgroud
+## Motivation
+This project started from a need to access shared directories from remote machines on old laboratory device running DOS. This device lacked a network card and only had an RS232 serial port and a parallel port. I needed a solution that:
 
-I was looking for possibilities to mount remote directories on old laboratory devices that use the DOS operating system. I was looking for software that allows to mount and unmount remote directories without rebooting and works over IP.  Because the mentioned laboratory devices do not have a network card, but only an RS232 serial port, the software must work over it. The used laboratory devices have little RAM and low CPU power.
+- Works over IP (including SLIP via serial port),
+- Has minimal memory and CPU requirements.
+- Is portable.
 
-I haven't found any software that meets the requirements. The closest was the program `etherdfs`, but even that does not meet several requirements. So I decided to write my own.
+After researching available tools, I found nothing that fully met these needs. So I decided to build my own.
 
-In the past I have written software for various industrial embedded devices. For example, industrial protocol converters, drivers for special hardware, realtime signal processing software, etc. So it is not a problem to write something new. But there is a problem with the documentation. For example, when writing industrial communication, there is an official standard to meet. When writing `NetMount`, I didn't find an official standard (API documentation) of MS-DOS interface for writing drivers. So I read the texts and source codes I found on the internet. I would specifically mention RBIL, the source code of `etherdfs-server`, `etherdfs-client`. Thanks to the authors of these documentation and software.
+In the past, I have developed software for a number of industrial embedded devices, such as protocol converters, drivers for specialized hardware, and real-time signal processing systems. Therefore, creating new software is not a problem for me. However, the problem often lies in the availability of documentation. When developing NetMount, I could not find an official standard (API documentation) for the MS-DOS driver interface. As a result, I relied on unofficial documentation and existing source code that I found on the Internet.
 
-I decided to publish my work as open source to help other people.
+I would like to mention https://mirror.cs.msu.ru/oldlinux.org/Linux.old/docs/interrupts/int-html/,
+RBIL (Ralf Brown’s Interrupt List) and the source code of etherdfs-server and etherdfs-client. However, my thanks go to the authors of all the useful resources that I found on the Internet. Thank you.
 
-During development I am testing a DOS client in DOSEM running on Linux. I also tried basic tests on a physical device with MS-DOS 6.22 and FreeDOS 1.3. When testing on a physical device, I used the RS232 serial port instead of a network card and the "ethersl.com" packet driver from Crynwr, which implements SLIP.
+----
+## Development & Testing
+### DOS Client:
+- **Build:** Compiled using Open Watcom v2.
+- **Emulated environment testing:** Tested with DOSEMU on Linux.
+- **Real hardware testing:** Tested on MS-DOS 6.22 and FreeDOS 1.3.
+- **Serial communication testing:** Using the ethersl.com SLIP packet driver from Crynwr.
+
+### Server:
+- **POSIX version:** Compiled on Linux and FreeBSD. Tested on Linux.
+- **Windows version:** Cross-compiled on Linux using MinGW. Tested with Wine on Linux.
+
+----
+## License
+I decided to publish my work as open source to help other people. This project is licensed under the GPLv2 License. You can freely use, modify, and distribute it, as long as you comply with the terms of the GPLv2 license.
