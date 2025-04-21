@@ -442,6 +442,11 @@ static uint8_t handle_ipv4(void) {
         return 0xFF;
     }
 
+    // validate IP header checksum
+    if (internet_checksum(&rcv_frame->ipv4, sizeof(rcv_frame->ipv4)) != 0) {
+        return 0xFF;
+    }
+
     getptr_shared_data()->server_response_received = 1;
 
     return 0;  // don't free rcv buffer, will be fried in 2F hadler
