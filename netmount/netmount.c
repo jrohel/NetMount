@@ -14,11 +14,16 @@
 
 #define PROGRAM_VERSION "1.2.0"
 
+
+#define CHECKSUM_IP_HEADER      0x01
+#define CHECKSUM_NETMOUNT_PROTO 0x02
+
 // Program parameters
 #define ENABLE_DRIVE_PROTO_CHECKSUM     1
 #define DEFAULT_MIN_RCV_TMO_SECONDS     1  // If it is changed, adjust the help
 #define DEFAULT_MAX_RCV_TMO_SECONDS     5  // If it is changed, adjust the help
 #define DEFAULT_MAX_NUM_REQUEST_RETRIES 4  // If it is changed, adjust the help
+#define DEFAULT_ENABLED_CHECKSUMS       (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
 #define MAX_FRAMESIZE                   1200
 
 #define ARP_REQUEST_RCV_TMO_SEC 1
@@ -53,6 +58,7 @@ struct shared_data {
         uint8_t min_rcv_tmo_18_2_ticks_shr_2;  // Minimum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_request_retries;           // Maximum number of request retries
+        uint8_t enabled_checksums;
     } drives[MAX_DRIVERS_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
@@ -76,7 +82,7 @@ struct shared_data {
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
 };
 
-#define SHARED_DATA_SIZE 253  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 279  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -327,6 +333,7 @@ static void create_ip(struct ipv4_hdr * ipv4, union ipv4_addr dst_addr, uint16_t
     ipv4->src_addr = getptr_shared_data()->local_ipv4;
     ipv4->dst_addr = dst_addr;
 
+    // The IP header checksum is mandatory. It must always be sent.
     ipv4->hdr_csum = internet_checksum(ipv4, sizeof(*ipv4));
 }
 
@@ -442,8 +449,10 @@ static uint8_t handle_ipv4(void) {
         return 0xFF;
     }
 
-    // validate IP header checksum
-    if (internet_checksum(&rcv_frame->ipv4, sizeof(rcv_frame->ipv4)) != 0) {
+    // if IP header checksum validation is enabled, perform it
+    const uint8_t reqdrv = *getptr_global_req_drive();
+    if ((getptr_shared_data()->drives[reqdrv].enabled_checksums & CHECKSUM_IP_HEADER) &&
+        (internet_checksum(&rcv_frame->ipv4, sizeof(rcv_frame->ipv4)) != 0)) {
         return 0xFF;
     }
 
@@ -657,7 +666,7 @@ static uint16_t send_request(
     snd_drive_proto->sequence = sequence_num;  // sequence number
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
-    if (ENABLE_DRIVE_PROTO_CHECKSUM) {
+    if (getptr_shared_data()->drives[local_drive].enabled_checksums & CHECKSUM_NETMOUNT_PROTO) {
         snd_drive_proto->length_flags |= 0x8000U;  // switch checksum on
         snd_drive_proto->checksum = bsd_checksum(
             (uint8_t *)(&snd_drive_proto->checksum + 1),
@@ -725,11 +734,11 @@ static uint16_t send_request(
             if (rcv_drive_proto->length_flags & 0x8000U) {
                 // the received data contains a checksum
                 // if enabled, check the received checksum
-                if (ENABLE_DRIVE_PROTO_CHECKSUM &&
-                    bsd_checksum(
-                        (uint8_t *)(&rcv_drive_proto->checksum + 1),
-                        len - ((uint8_t *)(&rcv_drive_proto->checksum + 1) - (uint8_t *)rcv_drive_proto)) !=
-                        rcv_drive_proto->checksum) {
+                if ((getptr_shared_data()->drives[local_drive].enabled_checksums & CHECKSUM_NETMOUNT_PROTO) &&
+                    (bsd_checksum(
+                         (uint8_t *)(&rcv_drive_proto->checksum + 1),
+                         len - ((uint8_t *)(&rcv_drive_proto->checksum + 1) - (uint8_t *)rcv_drive_proto)) !=
+                     rcv_drive_proto->checksum)) {
                     goto ignore_frame;
                 }
             } else {
@@ -2061,6 +2070,7 @@ static void print_help(void) {
                         "/ALL                      Unmount all drives\r\n"
                         "<remote_ipv4_addr>        Specifies IP address of remote server\r\n"
                         "<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n"
+                        "/CHECKSUMS:<names>        Enabled checksums (IP_HEADER,NETMOUNT; both default)\r\n"
                         "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n"
                         "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n"
                         "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)\r\n"
@@ -2296,6 +2306,7 @@ int main(int argc, char * argv[]) {
         uint16_t min_rcv_tmo_sec = DEFAULT_MIN_RCV_TMO_SECONDS;
         uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SECONDS;
         uint8_t max_request_retries = DEFAULT_MAX_NUM_REQUEST_RETRIES;
+        uint8_t enabled_checksums = DEFAULT_ENABLED_CHECKSUMS;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
                 // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
@@ -2327,6 +2338,26 @@ int main(int argc, char * argv[]) {
 
                 mount_drive_set = 1;
 
+                continue;
+            }
+            if (strn_upper_cmp(argv[i] + 1, "CHECKSUMS:", 10) == 0) {
+                const char * ptr = argv[i] + 11;
+                enabled_checksums = 0;  // disable all checksums, user-defined list is then enabled
+                while (*ptr != '\0') {
+                    if ((strn_upper_cmp(ptr, "IP_HEADER", 9) == 0) && (ptr[9] == '\0' || ptr[9] == ',')) {
+                        enabled_checksums |= CHECKSUM_IP_HEADER;
+                        ptr += 9;
+                    } else if ((strn_upper_cmp(ptr, "NETMOUNT", 8) == 0) && (ptr[8] == '\0' || ptr[8] == ',')) {
+                        enabled_checksums |= CHECKSUM_NETMOUNT_PROTO;
+                        ptr += 8;
+                    } else {
+                        my_print_dos_string("Bad checksum specification\r\n$");
+                        return EXIT_BAD_ARG;
+                    }
+                    if (*ptr == ',') {
+                        ++ptr;
+                    }
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MIN_RCV_TMO:", 12) == 0) {
@@ -2388,6 +2419,8 @@ int main(int argc, char * argv[]) {
         shared_data_ptr->drives[drive_no].max_rcv_tmo_18_2_ticks_shr_2 = ((max_rcv_tmo_sec * 182) / 10) >> 2;
 
         shared_data_ptr->drives[drive_no].max_request_retries = max_request_retries;
+
+        shared_data_ptr->drives[drive_no].enabled_checksums = enabled_checksums;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)

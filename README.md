@@ -50,6 +50,7 @@ Arguments:
 /ALL                      Unmount all drives
 <remote_ipv4_addr>        Specifies IP address of remote server
 <remote_udp_port>         Specifies remote UDP port. 12200 by default
+/CHECKSUMS:<names>        Enabled checksums (IP_HEADER,NETMOUNT; both default)
 /MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)
 /MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)
 /MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)
