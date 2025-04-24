@@ -18,7 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 
-#define PROGRAM_VERSION "1.0.2"
+#define PROGRAM_VERSION "1.1.0"
 
 #define MAX_DRIVERS_COUNT 26
 

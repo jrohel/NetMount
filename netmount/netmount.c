@@ -12,7 +12,7 @@
 
 #pragma pack(1)
 
-#define PROGRAM_VERSION "1.2.0"
+#define PROGRAM_VERSION "1.3.0"
 
 
 #define CHECKSUM_IP_HEADER      0x01
