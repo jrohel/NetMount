@@ -21,7 +21,7 @@ It consist of two components:
 ```
 NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
          [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]
-         [/NO_ARP_REQUESTS]
+         [/MTU:<size>] [/NO_ARP_REQUESTS]
 
 NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]
          [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]
@@ -44,6 +44,7 @@ Arguments:
                           First found in range 0x60 - 0x80 by default.
 /MASK:<net_mask>          Sets network mask
 /GW:<gateway_addr>        Sets gateway address
+/MTU:<size>               Interface MTU (560-1500, default 1500)
 /NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed
 <local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)
 <remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)

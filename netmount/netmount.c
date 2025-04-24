@@ -24,7 +24,13 @@
 #define DEFAULT_MAX_RCV_TMO_SECONDS     5  // If it is changed, adjust the help
 #define DEFAULT_MAX_NUM_REQUEST_RETRIES 4  // If it is changed, adjust the help
 #define DEFAULT_ENABLED_CHECKSUMS       (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
-#define MAX_FRAMESIZE                   1200
+
+#define MAX_INTERFACE_MTU 1500
+
+// 14 = sizeof(mac_hdr); 4 = FCS (validated by hardware/driver, usually not passed to user, but just in case)
+#define MAX_FRAMESIZE 14 + MAX_INTERFACE_MTU + 4
+
+#define DEFAULT_INTERFACE_MTU 1500
 
 #define ARP_REQUEST_RCV_TMO_SEC 1
 #define ARP_REQUEST_MAX_RETRIES 4
@@ -65,6 +71,7 @@ struct shared_data {
     uint16_t local_port;
     int8_t disable_sending_arp_request;  // A non-zero value disables sending ARP requests, replying is still allowed.
     uint8_t gateway_ip_slot;             // index of gateway ip address in ip_mac_map table
+    uint16_t interface_mtu;
     struct ip_mac_map {
         union ipv4_addr ip;
         struct mac_addr mac_addr;
@@ -82,7 +89,7 @@ struct shared_data {
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
 };
 
-#define SHARED_DATA_SIZE 279  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 281  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -611,8 +618,8 @@ static uint16_t send_request(
     const uint16_t frame_length = sizeof(struct mac_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) +
                                   sizeof(struct drive_proto_hdr) + request_data_len;
 
-    // Cannot send a longer frame than MAX_FRAMESIZE.
-    if (frame_length > MAX_FRAMESIZE)
+    // Cannot send a longer PDU than interface MTU.
+    if (frame_length - sizeof(struct mac_hdr) > getptr_shared_data()->interface_mtu)
         return 0;
 
     volatile struct ip_mac_map * const ip_to_mac_map =
@@ -914,11 +921,12 @@ static void handle_request_for_our_drive(void) {
 
             // split read request into chunks that fit into a network frame
             uint16_t total_read_len = 0;
+            const uint16_t max_chunk_len =
+                getptr_shared_data()->interface_mtu + sizeof(struct mac_hdr) - DRIVE_DATA_OFFSET;
             for (;;) {
                 uint16_t len;
-                const uint16_t chunklen = r->w.cx - total_read_len > MAX_FRAMESIZE - DRIVE_DATA_OFFSET
-                                              ? MAX_FRAMESIZE - DRIVE_DATA_OFFSET
-                                              : r->w.cx - total_read_len;
+                const uint16_t chunklen =
+                    r->w.cx - total_read_len > max_chunk_len ? max_chunk_len : r->w.cx - total_read_len;
                 struct drive_proto_readf * const args = (struct drive_proto_readf * const)buff;
                 args->offset = sftptr->file_pos + total_read_len;
                 args->start_cluster = sftptr->start_cluster;
@@ -967,11 +975,10 @@ static void handle_request_for_our_drive(void) {
             // split write request into chunks that fit into a network frame
             uint16_t total_written_len = 0;
             uint16_t bytes_left = r->w.cx;
+            const uint16_t max_chunk_len = getptr_shared_data()->interface_mtu + sizeof(struct mac_hdr) -
+                                           DRIVE_DATA_OFFSET - sizeof(struct drive_proto_writef);
             do {  // 0-bytes write must be sent too, it means "truncate"
-                const uint16_t chunklen =
-                    bytes_left > MAX_FRAMESIZE - DRIVE_DATA_OFFSET - sizeof(struct drive_proto_writef)
-                        ? MAX_FRAMESIZE - DRIVE_DATA_OFFSET - sizeof(struct drive_proto_writef)
-                        : bytes_left;
+                const uint16_t chunklen = bytes_left > max_chunk_len ? max_chunk_len : bytes_left;
                 struct drive_proto_writef * const args = (struct drive_proto_writef * const)buff;
                 args->offset = sftptr->file_pos;
                 args->start_cluster = sftptr->start_cluster;
@@ -2041,7 +2048,7 @@ static void print_help(void) {
                         "\r\n"
                         "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
                         "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n"
-                        "         [/NO_ARP_REQUESTS]\r\n"
+                        "         [/MTU:<size>] [/NO_ARP_REQUESTS]\r\n"
                         "\r\n"
                         "NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]\r\n"
                         "         [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]\r\n"
@@ -2064,6 +2071,7 @@ static void print_help(void) {
                         "                          First found in range 0x60 - 0x80 by default.\r\n"
                         "/MASK:<net_mask>          Sets network mask\r\n"
                         "/GW:<gateway_addr>        Sets gateway address\r\n"
+                        "/MTU:<size>               Interface MTU (560-1500, default 1500)\r\n"
                         "/NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed\r\n"
                         "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
                         "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
@@ -2145,6 +2153,7 @@ int main(int argc, char * argv[]) {
         getptr_shared_data()->local_port = DRIVE_PROTO_UDP_PORT;
         getptr_shared_data()->net_mask.value = 0;
         getptr_shared_data()->requested_pktdrv_int = 0;
+        getptr_shared_data()->interface_mtu = DEFAULT_INTERFACE_MTU;
         getptr_shared_data()->disable_sending_arp_request = 0;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
@@ -2175,6 +2184,15 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "PKT_INT:", 8) == 0) {
                 const char * endptr;
                 getptr_shared_data()->requested_pktdrv_int = strto_ui16(argv[i] + 9, &endptr);
+                continue;
+            }
+            if (strn_upper_cmp(argv[i] + 1, "MTU:", 4) == 0) {
+                const char * endptr;
+                getptr_shared_data()->interface_mtu = strto_ui16(argv[i] + 5, &endptr);
+                if (getptr_shared_data()->interface_mtu > 1500 || getptr_shared_data()->interface_mtu < 560) {
+                    my_print_dos_string("Error: Interface MTU must be in the range 560-1500.\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "NO_ARP_REQUESTS", 16) == 0) {
