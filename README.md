@@ -23,8 +23,8 @@ NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
          [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]
          [/NO_ARP_REQUESTS]
 
-NETMOUNT MOUNT [/MIN_RCV_TMO:<seconds>] [/MAX_RCV_TMO:<seconds>]
-         [/MAX_RETRIES:<count>]
+NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]
+         [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]
          <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
          <local_drive_letter>
 
