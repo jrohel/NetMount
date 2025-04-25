@@ -352,8 +352,8 @@ static void create_udp(struct udp_hdr * udp, uint16_t src_port, uint16_t dst_por
     udp->checksum = 0;  // 0 - not used
 }
 
-
-#pragma aux send_frame parm[cx][si] modify exact[ax cx dx si]
+// The FTP Software version 1.11 specification states that some packet drivers may change registry values.
+#pragma aux send_frame parm[cx][si] modify exact[ax bx cx dx si di bp es]
 static void __declspec(naked) send_frame(uint16_t frame_length, const void * sndbuff) {
     // suppress Open Watcom warning: "Parameter has been defined, but not referenced"
     frame_length;
@@ -363,10 +363,15 @@ static void __declspec(naked) send_frame(uint16_t frame_length, const void * snd
     __asm {
         mov ah, PKTDRV_FUNC_SEND_PKT
 
+        // Save DS, packet driver can change it
+        push ds
+
         // simulate INT instruction (pushf + cli + call __far)
         pushf
         cli
         call dword ptr global_pktdrv_INT_handler
+
+        pop ds
 
         ret
     }
@@ -1854,7 +1859,7 @@ static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data
 
 
 // Registers handler for type. If the return value is nonzero, it represents an error code.
-#pragma aux pktdrv_register_type parm[si][di][bx] modify exact[ax cx dx es] value[dh]
+#pragma aux pktdrv_register_type parm[si][di][bx] modify exact[ax bx cx dx si di bp es] value[dh]
 static uint8_t __declspec(naked) pktdrv_register_type(
     const uint16_t * packet_type, const void * pktdrv_recv, uint16_t * pkt_handle) {
 
@@ -1877,10 +1882,15 @@ static uint8_t __declspec(naked) pktdrv_register_type(
         push cs
         pop es
 
+        // Save DS, packet driver can change it
+        push ds
+
         // simulate INT instruction (pushf + cli + call __far)
         pushf
         cli
         call dword ptr global_pktdrv_INT_handler
+
+        pop ds
 
         jc error  // if carry, errorcode returned in DH
 
@@ -1904,16 +1914,18 @@ static uint8_t __declspec(naked) pktdrv_register_type(
 static uint8_t pktdrv_release_type(uint16_t type_handle);
 #pragma aux pktdrv_release_type =           \
     INSTR(mov ah, PKTDRV_FUNC_RELEASE_TYPE) \
+    "push ds"                               \
     "pushf"                                 \
     "cli"                                   \
     "call dword ptr global_pktdrv_INT_handler"    \
+    "pop ds"                                \
     "jc error"                              \
     "xor dh, dh"                            \
-    "error:" parm [bx] modify exact [ah dh] value [dh]
+    "error:" parm [bx] modify exact [ax bx cx dx si di bp es] value [dh]
 
 
 // get my own MAC addr. target MUST point to a space of at least 6 chars
-#pragma aux pktdrv_getaddr parm[di][bx] modify exact[ah cx dh es]
+#pragma aux pktdrv_getaddr parm[di][bx] modify exact[ax bx cx dx si di bp es]
 static void __declspec(naked) pktdrv_getaddr(struct mac_addr * dst, uint16_t pkt_handle) {
     // suppress Open Watcom warning: "Parameter has been defined, but not referenced"
     dst;
@@ -1928,10 +1940,15 @@ static void __declspec(naked) pktdrv_getaddr(struct mac_addr * dst, uint16_t pkt
         pop es
         mov cx, 6  // mac address length (ethernet = 6 bytes)
 
+        // Save DS, packet driver can change it
+        push ds
+
         // simulate INT instruction (pushf + cli + call __far)
         pushf
         cli
         call dword ptr global_pktdrv_INT_handler
+
+        pop ds
 
         ret
     }
