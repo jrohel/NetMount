@@ -35,7 +35,8 @@
 #define ARP_REQUEST_RCV_TMO_SEC 1
 #define ARP_REQUEST_MAX_RETRIES 4
 
-#define MY_STACK_SIZE 1024
+#define MY_STACK_SIZE      1024
+#define RECEIVE_STACK_SIZE 256  // Stack used when packet is received
 
 // The MS-DOS .com file format is a memory dump of the 16-bit address space starting at offset 0100h,
 // and continuing for the size of the program.
@@ -112,14 +113,16 @@ static void * get_offset(const void * func);
     }                                          \
     static inline type * getptr_##name(void) { return (type *)get_offset(name); }
 
-CS_VARIABLE(global_my_stack, int16_t, MY_STACK_SIZE)  // stack is array of 16 values
+CS_VARIABLE(global_receive_stack, int16_t, RECEIVE_STACK_SIZE)  // stack is array of 16 bit values
+CS_VARIABLE(global_my_stack, int16_t, MY_STACK_SIZE)            // stack is array of 16 bit values
 CS_VARIABLE(global_recv_buff, struct ether_frame, MAX_FRAMESIZE)
 CS_VARIABLE(global_send_buff, struct ether_frame, MAX_FRAMESIZE)
 CS_VARIABLE(global_send_arp_request_buff, struct ether_frame, 42)  // 14 (MAC) + 28 (ARP)
 CS_VARIABLE(global_orig_INT2F_handler, interrupt_handler, 4)
 CS_VARIABLE(global_pktdrv_INT_handler, interrupt_handler, 4)
 CS_VARIABLE(global_recv_data_len, int16_t, 2)  // length of received data, 0 means "free", neg value means "awaiting"
-CS_VARIABLE(global_orig_stack_ptr, int16_t __far *, 4)  // stack is array of 16 values
+CS_VARIABLE(global_orig_receive_stack_ptr, int16_t __far *, 4)  // stack is array of 16 bit values
+CS_VARIABLE(global_orig_stack_ptr, int16_t __far *, 4)          // stack is array of 16 bit values
 CS_VARIABLE(global_my_2Fmux_id, uint8_t, 1)
 CS_VARIABLE(global_req_drive, uint8_t, 1)  // the requested drive, set by the INT 2F handler and read by process2f()
 CS_VARIABLE(global_ipv4_last_sent_packet_id, uint16_t, 2)  // id inserted into last IPv4 header
@@ -486,6 +489,7 @@ static void __declspec(naked) pktdrv_recv(void) {
     __asm {
         push ds
         push bx
+        push ax
         pushf
 
         push cs
@@ -529,12 +533,33 @@ static void __declspec(naked) pktdrv_recv(void) {
 
         cmp word ptr global_recv_data_len, 34  // 14 (MAC) + 20 (IPv4)
         jl drop
-        push ax
         mov ax, word ptr global_recv_buff[12]
         cmp ax, 0x0008  //swap_word(ETHER_TYPE_IPV4)
-        pop ax
         jne try_arp
+
+        // switch to my receive stack
+        mov word ptr global_orig_receive_stack_ptr + 2, ss
+        mov word ptr global_orig_receive_stack_ptr, sp
+        pushf
+        pop ax // Storing flags in the AX so that the IF (interrupt flag) can be restored after switching stacks
+        push ds
+        cli  // Disable interrupts - clears IF (interrupt flag)
+        pop ss
+        lea sp, global_receive_stack + RECEIVE_STACK_SIZE - 2
+        push ax
+        popf // Restore flags to restote IF to original state (may enable interrupts)
+
         call handle_ipv4
+
+        // switch stack back
+        pushf
+        pop ax
+        cli
+        mov ss, word ptr global_orig_receive_stack_ptr + 2
+        mov sp, word ptr global_orig_receive_stack_ptr
+        push ax
+        popf
+
         test bl, bl
         jnz drop
         jmp restore_and_ret
@@ -542,12 +567,32 @@ static void __declspec(naked) pktdrv_recv(void) {
     try_arp:
         cmp word ptr global_recv_data_len, 42  // 14 (MAC) + 28 (ARP)
         jl drop
-        push ax
         mov ax, word ptr global_recv_buff[12]
         cmp ax, 0x0608  //swap_word(ETHER_TYPE_ARP)
-        pop ax
         jne drop
+
+        // switch to my receive stack
+        mov word ptr global_orig_receive_stack_ptr + 2, ss
+        mov word ptr global_orig_receive_stack_ptr, sp
+        pushf
+        pop ax // Storing flags in the AX so that the IF (interrupt flag) can be restored after switching stacks
+        push ds
+        cli  // Disable interrupts - clears IF (interrupt flag)
+        pop ss
+        lea sp, global_receive_stack + RECEIVE_STACK_SIZE - 2
+        push ax
+        popf // Restore flags to restote IF to original state (may enable interrupts)
+
         call handle_arp
+
+        // switch stack back
+        pushf
+        pop ax
+        cli
+        mov ss, word ptr global_orig_receive_stack_ptr + 2
+        mov sp, word ptr global_orig_receive_stack_ptr
+        push ax
+        popf
 
     drop:
         mov word ptr global_recv_data_len, 0
@@ -555,6 +600,7 @@ static void __declspec(naked) pktdrv_recv(void) {
         // restore flags, bx and ds, then return
     restore_and_ret:
         popf
+        pop ax
         pop bx
         pop ds
         retf
