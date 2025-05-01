@@ -1,5 +1,6 @@
 # NetMount
 -----------
+
 **NetMount** enables DOS systems to access shared directories from remote machines as if they were local drives. It operates over the UDP protocol. The DOS client supports any interface for which a DOS Packet Driver class 1 (Ethernet II) exists, including Ethernet network adapters, serial, parallel, and other hardware interfaces. NetMount is optimized for low-resource environments, making it suitable for retro computing, embedded platforms, and legacy system integration.
 
 It consist of two components:
@@ -61,6 +62,10 @@ Arguments:
 -----
 ## `netmount-server` (Directory Sharing Server)
 - A cross-platform user-space application that shares directories over the network.
+- Any directory can be shared, including the root (/) directory.
+- The physical location of the directory is irrelevant (hard disk, RAM-based, CD-ROM, network-mounted drive, ...)
+- Uses the UDP protokol
+- Implements file name conversion to DOS 8.3 format.
 - Supports POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows.
 - Can run as a non-root/unprivileged user.
 - Supports multiple simultaneous instances, each with unique IP/port bindings.
@@ -70,14 +75,14 @@ Arguments:
 
 ### Usage:
 ```
-Usage:
-./netmount-server [--help] [--bind_ip_addr=] [--bind_port=udp_port] <drive>=<root_path> [... <drive>=<root_path>]
+./netmount-server [--help] [--bind_ip_addr=] [--bind_port=udp_port] <drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
 
 Options:
-  --help                   Display this help
-  --bind-addr=<IP_ADDR>    IP address to bind, all address ("0.0.0.0") by default
-  --bind-port=<UDP_PORT>   UDP port to listen, 12200 by default
-  <drive>=<root_path>      drive - DOS drive C-Z, root_path - paths to serve
+  --help                      Display this help
+  --bind-addr=<IP_ADDR>       IP address to bind, all address ("0.0.0.0") by default
+  --bind-port=<UDP_PORT>      UDP port to listen, 12200 by default
+  <drive>=<root_path>         drive - DOS drive C-Z, root_path - paths to serve
+  <name_conversion>=<method>  file name conversion method - OFF, RAM (RAM by default)
 ```
 
 -----

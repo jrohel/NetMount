@@ -11,7 +11,6 @@
 #include <linux/msdos_fs.h>
 #endif
 #include <stdio.h>
-#include <string.h>
 #ifdef __linux__
 #include <sys/ioctl.h>
 #endif
@@ -19,14 +18,82 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <algorithm>
+#include <compare>
 #include <exception>
 #include <format>
-#include <string>
+#include <string_view>
+
+
+std::strong_ordering operator<=>(const fcb_file_name & lhs, const fcb_file_name & rhs) noexcept {
+    auto ret = strncmp(
+        reinterpret_cast<const char *>(lhs.name_blank_padded),
+        reinterpret_cast<const char *>(rhs.name_blank_padded),
+        sizeof(lhs.name_blank_padded));
+    if (ret == 0) {
+        ret = strncmp(
+            reinterpret_cast<const char *>(lhs.ext_blank_padded),
+            reinterpret_cast<const char *>(rhs.ext_blank_padded),
+            sizeof(lhs.ext_blank_padded));
+    }
+    return ret == 0 ? std::strong_ordering::equal
+                    : (ret < 0 ? std::strong_ordering::less : std::strong_ordering::greater);
+}
+
+
+bool operator==(const fcb_file_name & lhs, const fcb_file_name & rhs) noexcept { return (lhs <=> rhs) == 0; }
+
 
 namespace netmount_srv {
 
 namespace {
+
+// Fills the DosFileProperties structure if `properties` != nullptr.
+// Returns DOS attributes for `path` or FAT_ERROR_ATTR on error.
+// DOS attr flags: 1=RO 2=HID 4=SYS 8=VOL 16=DIR 32=ARCH 64=DEVICE
+uint8_t get_path_dos_properties(const std::filesystem::path & path, DosFileProperties * properties, bool use_fat_ioctl);
+
+// Sets attributes `attrs` on file defined by `path`.
+// Throws exception on error.
+void set_item_attrs(const std::filesystem::path & path, uint8_t attrs);
+
+// Creates directory `dir`
+// Throws exception on error.
+void make_dir(const std::filesystem::path & dir);
+
+// Removes directory `dir`
+// Throws exception on error.
+void delete_dir(const std::filesystem::path & dir);
+
+// Changes the current working directory to `dir`
+// Throws exception on error.
+void change_dir(const std::filesystem::path & dir);
+
+// Creates or truncates a file `path` with attributes `attrs`.
+// Returns properties of created/truncated file.
+// Throws exception on error.
+DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl);
+
+// Removes `file`
+// Throws exception on error.
+void delete_file(const std::filesystem::path & file);
+
+// Renames `old_name` to `new_name`
+// Throws exception on error or if no matching file found
+void rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name);
+
+// Returns filesystem total size and free space in bytes, or 0, 0 on error
+std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path);
+
+// Returns `true` if `path` is on FAT filesystem
+bool is_on_fat(const std::filesystem::path & path);
+
+// Converts lowercase ascii characters to uppercase and removes illegal characters
+// Returns new length and true if file name was shortened
+std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * out_buf, unsigned int buf_size);
+
+// Converts server file name to DOS short name in FCB format
+bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names);
+
 
 // Tests whether the FCB file name matches the FCB file mask.
 bool match_fcb_name_to_mask(const fcb_file_name & mask, const fcb_file_name & name) {
@@ -84,7 +151,7 @@ void Drives::DriveInfo::set_root(std::filesystem::path root) {
 }
 
 
-uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
+uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
     uint16_t first_free = items.size();
     uint16_t oldest = 0;
     const time_t now = time(NULL);
@@ -93,9 +160,9 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
     for (uint16_t handle = 0; handle < items.size(); ++handle) {
         auto & cur_item = items[handle];
 
-        if (cur_item.path == path) {
+        if (cur_item.path == server_path) {
             cur_item.last_used_time = now;
-            dbg_print("Found handle {} with path \"{}\" in cache\n", handle, path.string());
+            dbg_print("Found handle {} with path \"{}\" in cache\n", handle, server_path.string());
             return handle;
         }
 
@@ -103,7 +170,8 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
             if (!cur_item.directory_list.empty()) {
                 // Directory list is too old -> remove it from cache and free memory.
                 // It will be re-generated if necessary.
-                dbg_print("Remove old directory list for handle {} path \"{}\" from cache\n", handle, path.string());
+                dbg_print(
+                    "Remove old directory list for handle {} path \"{}\" from cache\n", handle, server_path.string());
                 cur_item.directory_list = {};
             }
         }
@@ -125,7 +193,7 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
     }
 
     // assign item to handle
-    items[first_free].path = path;
+    items[first_free].path = server_path;
     items[first_free].last_used_time = now;
 
     return first_free;
@@ -207,22 +275,28 @@ int32_t FilesystemDB::get_file_size(uint16_t handle) {
 
 
 bool FilesystemDB::find_file(
-    DosFileProperties & properties,
+    const Drives::DriveInfo & drive_info,
     uint16_t handle,
     const fcb_file_name & tmpl,
     unsigned char attr,
-    uint16_t & nth,
-    bool is_root_dir,
-    bool use_fat_ioctl) {
+    DosFileProperties & properties,
+    uint16_t & nth) {
 
     if (items[handle].path.empty()) {
         err_print("ERROR: FilesystemDB::find_file: handle {} not found\n", handle);
         return false;
     }
 
+    std::error_code ec;
+    const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), drive_info.get_root(), ec);
+    if (ec) {
+        dbg_print("find_file: {}\n", ec.message());
+        return false;
+    }
+
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (items[handle].directory_list.empty())) {
-        const auto count = items[handle].create_directory_list(use_fat_ioctl);
+        const auto count = items[handle].create_directory_list(drive_info);
         if (count < 0) {
             err_print("ERROR: Failed to scan dir \"{}\"\n", items[handle].path.string());
             return false;
@@ -231,8 +305,9 @@ bool FilesystemDB::find_file(
             dbg_print("Scanned dir \"{}\", found {} items\n", items[handle].path.string(), count);
             for (const auto & item : items[handle].directory_list) {
                 dbg_print(
-                    "  \"{:>11}\", attr 0x{:02X}, {} bytes\n",
-                    reinterpret_cast<const char *>(&item.fcb_name),
+                    "  \"{:.8s}{:.3s}\", attr 0x{:02X}, {} bytes\n",
+                    reinterpret_cast<const char *>(&item.fcb_name.name_blank_padded),
+                    reinterpret_cast<const char *>(&item.fcb_name.ext_blank_padded),
                     item.attrs,
                     item.size);
             }
@@ -279,20 +354,255 @@ bool FilesystemDB::find_file(
 }
 
 
-int32_t FilesystemDB::Item::create_directory_list(bool use_fat_ioctl) {
+const std::filesystem::path & FilesystemDB::get_server_name(
+    const Drives::DriveInfo & drive_info, uint16_t handle, const fcb_file_name & fcb_name, bool create_directory_list) {
+    static const std::filesystem::path empty_path;
+    auto & item = items[handle];
+    if (create_directory_list || item.directory_list.empty()) {
+        item.create_directory_list(drive_info);
+    }
+    for (auto & dir : item.directory_list) {
+        if (dir.fcb_name == fcb_name) {
+            return dir.server_name;
+        }
+    }
+    return empty_path;
+}
+
+
+std::pair<std::filesystem::path, bool> FilesystemDB::create_server_path(
+    uint8_t drive_num, const std::filesystem::path & client_path, bool create_directory_list) {
+    const auto & drive_info = drives.get_info(drive_num);
+    const auto & root = drive_info.get_root();
+
+    if (client_path.empty()) {
+        return {root, true};
+    }
+
+    if (drive_info.get_file_name_conversion() == Drives::DriveInfo::FileNameConversion::OFF) {
+        auto server_path = root / client_path;
+        return {server_path, std::filesystem::exists(server_path)};
+    }
+
+    std::filesystem::path server_path = root;
+    auto it = client_path.begin();
+    auto it_end = client_path.end();
+    while (true) {
+        const fcb_file_name fcb_name = short_name_to_fcb(it->string());
+        auto & server_name = get_server_name(drive_info, get_handle(server_path), fcb_name, create_directory_list);
+        auto prev_it = it;
+        ++it;
+        if (server_name.empty()) {
+            if (it == it_end) {
+                server_path /= *prev_it;
+                return {server_path, false};
+            }
+            throw std::runtime_error("Error: create_server_path: Parent path not found");
+        }
+        server_path /= server_name;
+        if (it == it_end) {
+            return {server_path, true};
+        }
+    }
+}
+
+
+void FilesystemDB::make_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(drive_num, client_path);
+    if (exist) {
+        throw std::runtime_error("make_dir: Directory exists: " + server_path.string());
+    }
+    netmount_srv::make_dir(server_path);
+
+    // Recreates directory_list
+    create_server_path(drive_num, client_path, true);
+}
+
+
+void FilesystemDB::delete_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(drive_num, client_path);
+    if (!exist) {
+        throw std::runtime_error("delete_dir: Directory does not exist: " + server_path.string());
+    }
+    netmount_srv::delete_dir(server_path);
+
+    // Recreates directory_list
+    create_server_path(drive_num, client_path, true);
+}
+
+
+void FilesystemDB::change_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(drive_num, client_path);
+    if (!exist) {
+        throw std::runtime_error("change_dir: Directory does not exist: " + server_path.string());
+    }
+    netmount_srv::change_dir(server_path);
+}
+
+
+void FilesystemDB::set_item_attrs(uint8_t drive_num, const std::filesystem::path & client_path, uint8_t attrs) {
+    const auto & drive_info = drives.get_info(drive_num);
+    if (drive_info.is_on_fat()) {
+        auto [server_path, exist] = create_server_path(drive_num, client_path);
+        netmount_srv::set_item_attrs(server_path, attrs);
+
+        // Recreates directory_list
+        create_server_path(drive_num, client_path, true);
+    }
+}
+
+
+uint8_t FilesystemDB::get_dos_properties(
+    uint8_t drive_num, const std::filesystem::path & client_path, DosFileProperties * properties) {
+    const auto & drive_info = drives.get_info(drive_num);
+    auto [server_path, exist] = create_server_path(drive_num, client_path);
+    return get_server_path_dos_properties(drive_info, server_path, properties);
+}
+
+
+uint8_t FilesystemDB::get_server_path_dos_properties(
+    const Drives::DriveInfo & drive_info, const std::filesystem::path & server_path, DosFileProperties * properties) {
+    return get_path_dos_properties(server_path, properties, drive_info.is_on_fat());
+}
+
+
+void FilesystemDB::rename_file(
+    uint8_t drive_num, const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
+    const auto [old_server_path, exist1] = create_server_path(drive_num, old_client_path);
+    const auto [new_server_path, exist2] = create_server_path(drive_num, new_client_path);
+    netmount_srv::rename_file(old_server_path, new_server_path);
+
+    // Recreates directory_list
+    create_server_path(drive_num, new_client_path, true);
+}
+
+
+void FilesystemDB::delete_files(uint8_t drive_num, const std::filesystem::path & client_pattern) {
+    const auto & drive_info = drives.get_info(drive_num);
+    const auto [server_path, exist] = create_server_path(drive_num, client_pattern);
+
+    if (get_path_dos_properties(server_path, NULL, drive_info.is_on_fat()) & FAT_RO) {
+        throw FilesystemError("Access denied: Read only FAT file system", DOS_EXTERR_ACCESS_DENIED);
+    }
+
+    if (exist) {
+        netmount_srv::delete_file(server_path);
+        return;
+    }
+
+    // test if pattern contains '?' characters
+    bool is_pattern = false;
+    const std::string & pattern_string = server_path.string();
+    for (auto ch : pattern_string) {
+        if (ch == '?') {
+            is_pattern = true;
+            break;
+        }
+    }
+    if (!is_pattern) {
+        throw FilesystemError("delete_files: File does not exist: " + server_path.string(), DOS_EXTERR_FILE_NOT_FOUND);
+    }
+
+    // if pattern, get directory and file parts and iterate over all directory
+    const std::filesystem::path directory = server_path.parent_path();
+    const std::string filemask = client_pattern.filename().string();
+
+    const auto filfcb = short_name_to_fcb(filemask);
+
+    if (drive_info.get_file_name_conversion() == Drives::DriveInfo::FileNameConversion::OFF) {
+        // If file name conversion is turned off, we traverse the file system directly.
+        for (const auto & dentry : std::filesystem::directory_iterator(directory)) {
+            if (dentry.is_directory()) {
+                // skip directories
+                continue;
+            }
+
+            // if match, delete the file
+            const auto & path_str = dentry.path().string();
+            if (match_fcb_name_to_mask(filfcb, short_name_to_fcb(path_str))) {
+                std::error_code ec;
+                if (!std::filesystem::remove(dentry.path(), ec)) {
+                    err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
+                }
+            }
+        }
+        return;
+    }
+
+    const auto handle = get_handle(directory);
+    const auto & item = items[handle];
+
+    // iterate over the directory_list and delete files that match the pattern
+    for (const auto & file_properties : item.directory_list) {
+        if (file_properties.attrs & FAT_DIRECTORY) {
+            // skip directories
+            continue;
+        }
+
+        if (match_fcb_name_to_mask(filfcb, file_properties.fcb_name)) {
+            const auto path = directory / file_properties.server_name;
+            try {
+                netmount_srv::delete_file(path);
+            } catch (const std::runtime_error & ex) {
+                err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
+            }
+        }
+    }
+}
+
+
+DosFileProperties FilesystemDB::create_or_truncate_file(
+    uint8_t drive_num, const std::filesystem::path & server_path, uint8_t attrs) {
+    const auto & drive_info = drives.get_info(drive_num);
+    return netmount_srv::create_or_truncate_file(server_path, attrs, drive_info.is_on_fat());
+}
+
+
+std::pair<uint64_t, uint64_t> FilesystemDB::space_info(uint8_t drive_num) {
+    const auto & root = drives.get_info(drive_num).get_root();
+    if (root.empty()) {
+        throw std::runtime_error("space_info: Not shared drive");
+    }
+    return netmount_srv::fs_space_info(root);
+}
+
+
+int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & drive_info) {
     directory_list.clear();
+    fcb_names.clear();
 
     for (const auto & dentry : std::filesystem::directory_iterator(path)) {
         if (directory_list.empty()) {
             for (const auto name : {".", ".."}) {
                 const auto fullpath = path / name;
                 DosFileProperties fprops;
-                get_path_dos_properties(fullpath, &fprops, use_fat_ioctl);
+                get_path_dos_properties(fullpath, &fprops, drive_info.is_on_fat());
+                fprops.fcb_name = short_name_to_fcb(name);
+                if (drive_info.get_file_name_conversion() != Drives::DriveInfo::FileNameConversion::OFF) {
+                    fprops.server_name = name;
+                }
+                dbg_print(
+                    "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                    name,
+                    (char *)fprops.fcb_name.name_blank_padded,
+                    (char *)fprops.fcb_name.ext_blank_padded);
                 directory_list.emplace_back(fprops);
             }
         }
+
         DosFileProperties fprops;
-        get_path_dos_properties(dentry.path(), &fprops, use_fat_ioctl);
+        auto path = dentry.path();
+        auto filename = path.filename();
+        get_path_dos_properties(path, &fprops, drive_info.is_on_fat());
+        if (drive_info.get_file_name_conversion() != Drives::DriveInfo::FileNameConversion::OFF) {
+            file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
+            fprops.server_name = filename;
+        }
+        dbg_print(
+            "create_directory_list: {} -> {:.8s} {:.3s}\n",
+            filename.string(),
+            (char *)fprops.fcb_name.name_blank_padded,
+            (char *)fprops.fcb_name.ext_blank_padded);
         directory_list.emplace_back(fprops);
     }
 
@@ -300,42 +610,139 @@ int32_t FilesystemDB::Item::create_directory_list(bool use_fat_ioctl) {
 }
 
 
-fcb_file_name filename_to_fcb(const char * filename) noexcept {
+fcb_file_name short_name_to_fcb(const std::string & short_name) noexcept {
     fcb_file_name fcb_name;
-    unsigned int i;
-
-    // initialize with spaces
-    std::fill(std::begin(fcb_name.name_blank_padded), std::end(fcb_name.name_blank_padded), ' ');
-    std::fill(std::begin(fcb_name.ext_blank_padded), std::end(fcb_name.ext_blank_padded), ' ');
-
-    // copy initial '.'
-    for (i = 0; i < sizeof(fcb_name.name_blank_padded) && filename[i] == '.'; ++i) {
-        fcb_name.name_blank_padded[i] = '.';
+    unsigned int i = 0;
+    auto it = short_name.begin();
+    const auto it_end = short_name.end();
+    while (it != it_end && *it == '.') {
+        fcb_name.name_blank_padded[i++] = '.';
+        ++it;
+        if (i == 2) {
+            break;
+        }
     }
-
-    // fill in the filename, up to 8 chars or first dot
-    for (; i < sizeof(fcb_name.name_blank_padded) && filename[i] != '.' && filename[i] != '\0'; ++i) {
-        fcb_name.name_blank_padded[i] = ascii_to_upper(filename[i]);
+    while (it != it_end && *it != '.') {
+        fcb_name.name_blank_padded[i++] = ascii_to_upper(*it);
+        ++it;
+        if (i == sizeof(fcb_name.name_blank_padded)) {
+            break;
+        }
     }
-    filename += i;
+    for (; i < sizeof(fcb_name.name_blank_padded); ++i) {
+        fcb_name.name_blank_padded[i] = ' ';
+    }
 
     // move to dot
-    while (*filename != '.' && *filename != '\0') {
-        ++filename;
+    while (it != it_end && *it != '.') {
+        ++it;
     }
 
-    if (*filename == '\0') {
-        return fcb_name;
+    // skip the dot
+    if (it != it_end) {
+        ++it;
     }
 
-    ++filename;  // skip the dot
+    i = 0;
+    for (; it != it_end && *it != '.'; ++it) {
+        fcb_name.ext_blank_padded[i++] = ascii_to_upper(*it);
+        if (i == sizeof(fcb_name.ext_blank_padded)) {
+            break;
+        }
+    }
 
-    // fill in the extension
-    for (i = 0; i < sizeof(fcb_name.ext_blank_padded) && filename[i] != '.' && filename[i] != '\0'; ++i) {
-        fcb_name.ext_blank_padded[i] = ascii_to_upper(filename[i]);
+    for (; i < sizeof(fcb_name.ext_blank_padded); ++i) {
+        fcb_name.ext_blank_padded[i] = ' ';
     }
 
     return fcb_name;
+}
+
+
+namespace {
+
+std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * out_buf, unsigned int buf_size) {
+    // Allowed special characters
+    static const std::set<char> allowed_special = {
+        '!', '#', '$', '%', '&', '\'', '(', ')', '-', '@', '^', '_', '`', '{', '}', '~'};
+
+    const std::size_t last_non_space_idx = in.find_last_not_of(' ');
+
+    bool shortened = false;
+    unsigned int out_len = 0;
+    for (std::size_t idx = 0; idx < in.length(); ++idx) {
+        const char ch = in[idx];
+        if (out_len == buf_size) {
+            return {out_len, true};
+        }
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || allowed_special.contains(ch)) {
+            out_buf[out_len++] = ch;
+            continue;
+        }
+        if (ch >= 'a' && ch <= 'z') {
+            out_buf[out_len++] = ch - 'a' + 'A';
+            continue;
+        }
+
+        // Spaces are allowed, but trailing spaces in the base name or extension
+        // are considered padding and are not part of the file name.
+        if (ch == ' ' && idx < last_non_space_idx) {
+            out_buf[out_len++] = ch;
+            continue;
+        }
+
+        shortened = true;
+    }
+
+    // pad with spaces
+    while (out_len < buf_size) {
+        out_buf[--buf_size] = ' ';
+    }
+
+    return {out_len, shortened};
+}
+
+
+bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names) {
+    const size_t dotPos = long_name.find_last_of('.');
+    std::string_view base;
+    std::string_view ext;
+    if (dotPos != std::string::npos) {
+        base = long_name.substr(0, dotPos);
+        ext = long_name.substr(dotPos + 1);
+    } else {
+        base = long_name;
+    }
+
+    auto * const name_blank_padded = reinterpret_cast<char *>(fcb_name.name_blank_padded);
+    auto * const ext_blank_padded = reinterpret_cast<char *>(fcb_name.ext_blank_padded);
+
+    auto [base_len, base_shortened] = sanitize_short_name(base, name_blank_padded, sizeof(fcb_name.name_blank_padded));
+    auto [ext_len, ext_shortened] = sanitize_short_name(ext, ext_blank_padded, sizeof(fcb_name.ext_blank_padded));
+
+    if (!base_shortened && !ext_shortened && used_names.insert(fcb_name).second) {
+        return true;
+    }
+
+    // add suffix number
+    for (unsigned int counter = 1; counter < 9999; ++counter) {
+        const unsigned int counter_len = counter > 999 ? 4 : (counter > 99 ? 3 : (counter > 9 ? 2 : 1));
+        if (base_len + counter_len > sizeof(fcb_name.name_blank_padded) - 1) {
+            base_len = sizeof(fcb_name.name_blank_padded) - 1 - counter_len;
+        }
+
+        name_blank_padded[base_len] = '~';
+        char * it_first = name_blank_padded + base_len + 1;
+        char * it_last = name_blank_padded + sizeof(fcb_name.name_blank_padded);
+        std::to_chars(it_first, it_last, counter);
+
+        if (used_names.insert(fcb_name).second) {
+            return true;
+        }
+    }
+
+    // Error: More then 9999 names with the same prefix
+    return false;
 }
 
 
@@ -351,7 +758,7 @@ uint8_t get_path_dos_properties(
         auto it = path.end();
         while (it != path.begin() && (--it)->empty()) {
         }
-        properties->fcb_name = filename_to_fcb(it->string().c_str());
+        properties->fcb_name = short_name_to_fcb(it->string());
 
         properties->time_date = time_to_fat(statbuf.st_mtime);
     }
@@ -465,56 +872,21 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
 }
 
 
-void delete_files(const std::filesystem::path & pattern) {
-    // test if pattern contains '?' characters
-    bool is_pattern = false;
-    const std::string & pattern_string = pattern.string();
-    for (auto ch : pattern_string) {
-        if (ch == '?') {
-            is_pattern = true;
-            break;
-        }
+void delete_file(const std::filesystem::path & file) {
+    if (!std::filesystem::exists(file)) {
+        throw FilesystemError("delete_files: File does not exist: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
     }
-
-    // if regular file, delete it right away
-    if (!is_pattern) {
-        if (!std::filesystem::exists(pattern)) {
-            throw std::runtime_error("delete_files: File does not exist: " + pattern.string());
-        }
-        if (std::filesystem::is_directory(pattern)) {
-            throw std::runtime_error("delete_files: Is a directory: " + pattern.string());
-        }
-        std::filesystem::remove(pattern);
-        return;
+    if (std::filesystem::is_directory(file)) {
+        throw FilesystemError("delete_files: Is a directory: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
     }
-
-    // if pattern, get directory and file parts and iterate over all directory
-    const std::filesystem::path directory = pattern.parent_path();
-    const std::string filemask = pattern.filename().string();
-
-    const auto filfcb = filename_to_fcb(filemask.c_str());
-
-    // iterate over the directory and delete files that match the pattern
-    for (const auto & dentry : std::filesystem::directory_iterator(directory)) {
-        if (dentry.is_directory()) {
-            // skip directories
-            continue;
-        }
-
-        // if match, delete the file
-        const auto & path_str = dentry.path().string();
-        if (match_fcb_name_to_mask(filfcb, filename_to_fcb(path_str.c_str()))) {
-            std::error_code ec;
-            if (!std::filesystem::remove(dentry.path(), ec)) {
-                err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
-            }
-        }
-    }
+    std::filesystem::remove(file);
 }
 
 
-bool rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name) noexcept {
-    return rename(old_name.string().c_str(), new_name.string().c_str()) == 0;
+void rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name) {
+    if (rename(old_name.string().c_str(), new_name.string().c_str()) != 0) {
+        throw std::runtime_error("rename_file: Cannot rename " + old_name.string() + " to " + new_name.string());
+    }
 }
 
 
@@ -541,5 +913,7 @@ bool is_on_fat([[maybe_unused]] const std::filesystem::path & path) {
     return false;
 #endif
 }
+
+}  // namespace
 
 }  // namespace netmount_srv
