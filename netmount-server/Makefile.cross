@@ -1,0 +1,71 @@
+# Example of a Makefile for cross-compilation.
+# May need to be modified according to the installed compilers.
+# I use the podman/docker container for cross-compilation to avoid polluting my work computer.
+# Tested cross compiling on Linux
+# Builds statically linked stripped binaries.
+
+# Example usage:
+#   make -f Makefile.cross
+
+HEADERS = fs.hpp udp_socket.hpp utils.hpp ../shared/dos.h ../shared/drvproto.h
+
+# posix
+CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
+LDFLAGS = -static -s
+SOURCES = netmount-server.cpp fs.cpp udp_socket.cpp
+
+# windows
+WIN_CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
+WIN_LDFLAGS = -static -s
+WIN_LIBS = -lws2_32
+WIN_SOURCES = netmount-server.cpp fs.cpp udp_socket_win.cpp
+
+NAME = netmount-server
+
+ARCHS = $(NAME)-linux-aarch64 $(NAME)-linux-aarch64be \
+    $(NAME)-linux-i686 $(NAME)-linux-x86_64 \
+    $(NAME)-linux-arm32v7 \
+    $(NAME)-linux-mips $(NAME)-linux-mipsel \
+    $(NAME)-i686.exe $(NAME)-x86_64.exe
+
+all: $(ARCHS)
+
+$(NAME)-linux-aarch64: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux little endian ARM64-bit...'
+	/aarch64--musl--stable-2024.05-1/bin/aarch64-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-aarch64be: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux big endian ARM64-bit...'
+	/aarch64be--musl--stable-2024.05-1/bin/a
+	arch64_be-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-i686: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux i686...'
+	/x86-i686--musl--stable-2024.05-1/bin/i686-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-x86_64: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux x86_64...'
+	/x86-64--musl--stable-2024.05-1/bin/x86_64-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-arm32v7: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux ARMv7 32-bit...'
+	/armv7-eabihf--musl--stable-2024.05-1/bin/arm-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-mips: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux MIPS...'
+	/mips32--musl--stable-2024.05-1/bin/mips-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-linux-mipsel: $(SOURCES) $(HEADERS)
+	echo 'Compiling for Linux MIPSel...'
+	/mips32el--musl--stable-2024.05-1/bin/mipsel-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+
+$(NAME)-i686.exe: $(WIN_SOURCES) $(HEADERS)
+	echo 'Compiling for Windows i686...'
+	i686-w64-mingw32-g++ $(WIN_CPPFLAGS) $(WIN_LDFLAGS) $(WIN_SOURCES) $(WIN_LIBS) -o $@
+
+$(NAME)-x86_64.exe: $(WIN_SOURCES) $(HEADERS)
+	echo 'Compiling for Windows x86_64...'
+	x86_64-w64-mingw32-g++ $(WIN_CPPFLAGS) $(WIN_LDFLAGS) $(WIN_SOURCES) $(WIN_LIBS) -o $@
+
+clean:
+	rm -f $(ARCHS)
