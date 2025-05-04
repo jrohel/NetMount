@@ -1,4 +1,7 @@
 # Tested cross compiling with MinGW compiler on Linux - x86_64 and i686 target architectures
+# Examples of usage:
+# Build 64-bit x86_64:  CXX=x86_64-w64-mingw32-g++ make -f Makefile.windows
+# Build 32-bit i686:    CXX=i686-w64-mingw32-g++ make -f Makefile.windows
 
 CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
 LIBRARIES = -lws2_32
