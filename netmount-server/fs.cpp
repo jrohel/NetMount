@@ -74,6 +74,16 @@ uint32_t time_to_fat(time_t t) {
 }  // namespace
 
 
+void Drives::DriveInfo::set_root(std::filesystem::path root) {
+    if (used) {
+        throw std::runtime_error("already used");
+    }
+    this->root = std::move(root);
+    used = true;
+    on_fat = ::netmount_srv::is_on_fat(this->root);
+}
+
+
 uint16_t FilesystemDB::get_handle(const std::filesystem::path & path) {
     uint16_t first_free = items.size();
     uint16_t oldest = 0;

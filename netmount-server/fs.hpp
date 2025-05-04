@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <vector>
 
+#define MAX_DRIVERS_COUNT 26
+
 // FAT attributes
 #define FAT_RO        0x01
 #define FAT_HIDDEN    0x02
@@ -46,8 +48,49 @@ struct DosFileProperties {
 };
 
 
+class Drives {
+public:
+    class DriveInfo {
+    public:
+        // Returns true if this drive is used (shared)
+        bool is_shared() const noexcept { return used; }
+
+        // Returns root path of shared drive.
+        const std::filesystem::path & get_root() const noexcept { return root; }
+
+        // Returns true if the shared drive is on FAT filesystem.
+        bool is_on_fat() const noexcept { return on_fat; }
+
+        // Sets `root` for this drive. Initialize `used` and `on_fat`.
+        void set_root(std::filesystem::path root);
+
+        DriveInfo() = default;
+
+        // DriveInfo is accessed by reference. Make sure no one copies the DriveInfo by mistake.
+        DriveInfo(const DriveInfo &) = delete;
+        DriveInfo & operator=(const DriveInfo &) = delete;
+
+    private:
+        bool used{false};
+        std::filesystem::path root;
+        bool on_fat;
+    };
+
+    const DriveInfo & get_info(uint8_t drive_num) const { return infos.at(drive_num); }
+    DriveInfo & get_info(uint8_t drive_num) { return infos.at(drive_num); }
+    const auto & get_infos() const { return infos; }
+
+private:
+    std::array<DriveInfo, MAX_DRIVERS_COUNT> infos;
+};
+
+
 class FilesystemDB {
 public:
+    /// Returns an object with information about the drives.
+    const Drives & get_drives() const noexcept { return drives; }
+    Drives & get_drives() noexcept { return drives; }
+
     /// Returns the handle (start cluster in dos) of a filesystem item (file or directory).
     /// Returns 0xffff on error
     uint16_t get_handle(const std::filesystem::path & path);
@@ -81,6 +124,8 @@ public:
         bool use_fat_ioctl);
 
 private:
+    Drives drives;
+
     class Item {
     public:
         std::filesystem::path path;                     // path to filesystem item

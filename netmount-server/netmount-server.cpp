@@ -20,59 +20,12 @@
 
 #define PROGRAM_VERSION "1.1.0"
 
-#define MAX_DRIVERS_COUNT 26
-
 // structs are packed
 #pragma pack(1)
 
 namespace netmount_srv {
 
 namespace {
-
-class Shares {
-public:
-    class ShareInfo {
-    public:
-        // Returns true if this drive is used (shared)
-        bool is_used() const noexcept { return used; }
-
-        // Returns root path of shared drive.
-        const std::filesystem::path & get_root() const noexcept { return root; }
-
-        // Returns true if the shared drive is on FAT filesystem.
-        bool is_on_fat() const noexcept { return on_fat; }
-
-        // Sets `root` for this drive. Initialize `used` and `on_fat`.
-        void set_root(std::filesystem::path root) {
-            if (used) {
-                throw std::runtime_error("already used");
-            }
-            this->root = std::move(root);
-            used = true;
-            on_fat = ::netmount_srv::is_on_fat(this->root);
-        }
-
-
-        ShareInfo() = default;
-
-        // ShareInfo is accessed by reference. Make sure no one copies the ShareInfo by mistake.
-        ShareInfo(const ShareInfo &) = delete;
-        ShareInfo & operator=(const ShareInfo &) = delete;
-
-    private:
-        bool used{false};
-        std::filesystem::path root;
-        bool on_fat;
-    };
-
-    const ShareInfo & get_info(uint8_t drive_num) const { return infos.at(drive_num); }
-    ShareInfo & get_info(uint8_t drive_num) { return infos.at(drive_num); }
-    const auto & get_infos() const { return infos; }
-
-private:
-    std::array<ShareInfo, MAX_DRIVERS_COUNT> infos;
-};
-
 
 // Reply cache - contains the last replies sent to clients
 // It is used in case a client has not received reply and resends request so that we don't process
@@ -124,7 +77,6 @@ ReplyCache::ReplyInfo & ReplyCache::get_reply_info(uint32_t ipv4_addr, uint16_t 
 
 
 // Define global data
-Shares shares;
 ReplyCache answer_cache;
 FilesystemDB fs;
 UdpSocket * udp_socket_ptr{nullptr};
@@ -206,8 +158,8 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     }
 
     // Do I share this drive?
-    const auto & share = shares.get_info(reqdrv);
-    if (!share.is_used()) {
+    const auto & drive_info = fs.get_drives().get_info(reqdrv);
+    if (!drive_info.is_shared()) {
         err_print("Requested drive is not shared: {:c}: (number {:d})\n", 'A' + reqdrv, reqdrv);
         return -1;
     }
@@ -226,7 +178,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     switch (function) {
         case INT2F_REMOVE_DIR:
         case INT2F_MAKE_DIR: {
-            const auto directory = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto directory = drive_info.get_root() / create_relative_path(request_data, request_data_len);
 
             if (function == INT2F_MAKE_DIR) {
                 dbg_print("MAKE_DIR \"{}\"\n", directory.string());
@@ -248,7 +200,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         } break;
 
         case INT2F_CHANGE_DIR: {
-            const auto directory = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto directory = drive_info.get_root() / create_relative_path(request_data, request_data_len);
 
             dbg_print("CHANGE_DIR \"{}\"\n", directory.string());
             // Try to chdir to this dir
@@ -339,7 +291,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
         case INT2F_DISK_INFO: {
             dbg_print("DISK_INFO for drive {:c}:\n", 'A' + reqdrv);
-            auto [fs_size, free_space] = fs_space_info(share.get_root());
+            auto [fs_size, free_space] = fs_space_info(drive_info.get_root());
             // limit results to slightly under 2 GiB (otherwise MS-DOS is confused)
             if (fs_size >= 2lu * 1024 * 1024 * 1024)
                 fs_size = 2lu * 1024 * 1024 * 1024 - 1;
@@ -363,10 +315,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto * const request = reinterpret_cast<const drive_proto_set_attrs *>(request_data);
             unsigned char attrs = request->attrs;
             const std::filesystem::path path =
-                share.get_root() / create_relative_path(request_data + 1, request_data_len - 1);
+                drive_info.get_root() / create_relative_path(request_data + 1, request_data_len - 1);
 
             dbg_print("SET_ATTRS on file \"{}\", attr: 0x{:02X}\n", path.string(), attrs);
-            if (share.is_on_fat()) {
+            if (drive_info.is_on_fat()) {
                 try {
                     set_item_attrs(path, attrs);
                 } catch (const std::runtime_error & ex) {
@@ -380,11 +332,11 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             if (request_data_len == 0) {
                 return -1;
             }
-            const auto path = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto path = drive_info.get_root() / create_relative_path(request_data, request_data_len);
 
             dbg_print("GET_ATTRS on file \"{}\"\n", path.string());
             DosFileProperties properties;
-            if (get_path_dos_properties(path, &properties, share.is_on_fat()) == FAT_ERROR_ATTR) {
+            if (get_path_dos_properties(path, &properties, drive_info.is_on_fat()) == FAT_ERROR_ATTR) {
                 dbg_print("no file found\n");
                 *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
             } else {
@@ -407,8 +359,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const int path1_len = request_data[0];
             const int path2_len = request_data_len - (1 + path1_len);
             if (request_data_len > path1_len) {
-                const auto path1 = share.get_root() / create_relative_path(request_data + 1, path1_len);
-                const auto path2 = share.get_root() / create_relative_path(request_data + 1 + path1_len, path2_len);
+                const auto path1 = drive_info.get_root() / create_relative_path(request_data + 1, path1_len);
+                const auto path2 =
+                    drive_info.get_root() / create_relative_path(request_data + 1 + path1_len, path2_len);
                 dbg_print("RENAME_FILE \"{}\" to \"{}\"\n", path1.string(), path2.string());
                 if (get_path_dos_properties(path2, NULL, 0) != FAT_ERROR_ATTR) {
                     err_print("ERROR: RENAME_FILE: destination file \"{}\" already exists\n", path2.string());
@@ -423,9 +376,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         } break;
 
         case INT2F_DELETE_FILE: {
-            const auto path = share.get_root() / create_relative_path(request_data, request_data_len);
+            const auto path = drive_info.get_root() / create_relative_path(request_data, request_data_len);
             dbg_print("DELETE_FILE \"{}\"\n", path.string());
-            if (get_path_dos_properties(path, NULL, share.is_on_fat()) & FAT_RO) {
+            if (get_path_dos_properties(path, NULL, drive_info.is_on_fat()) & FAT_RO) {
                 *ax = to_little16(DOS_EXTERR_ACCESS_DENIED);
             } else {
                 try {
@@ -447,14 +400,14 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const auto search_template = create_relative_path(request_data + 1, request_data_len - 1);
             const auto search_template_parent = search_template.parent_path();
             const auto directory =
-                search_template_parent.empty() ? share.get_root() : share.get_root() / search_template_parent;
+                search_template_parent.empty() ? drive_info.get_root() : drive_info.get_root() / search_template_parent;
             const std::string filemask = search_template.filename().string();
 
             const auto filemaskfcb = filename_to_fcb(filemask.c_str());
             dbg_print(
                 "FIND_FIRST in \"{}\"\n filemask: \"{}\"\n attrs: 0x{:2X}\n", directory.string(), filemask, fattr);
             std::error_code ec;
-            const bool is_root_dir = std::filesystem::equivalent(directory, share.get_root(), ec);
+            const bool is_root_dir = std::filesystem::equivalent(directory, drive_info.get_root(), ec);
             if (ec) {
                 dbg_print("is_root_dir: {}\n", ec.message());
                 // do not use DOS_EXTERR_FILE_NOT_FOUND, some applications rely on a failing FIND_FIRST
@@ -466,7 +419,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             DosFileProperties properties;
             uint16_t fpos = 0;
             if ((handle == 0xFFFFu) ||
-                !fs.find_file(properties, handle, filemaskfcb, fattr, fpos, is_root_dir, share.is_on_fat())) {
+                !fs.find_file(properties, handle, filemaskfcb, fattr, fpos, is_root_dir, drive_info.is_on_fat())) {
                 dbg_print("No matching file found\n");
                 // do not use DOS_EXTERR_FILE_NOT_FOUND, some applications rely on a failing FIND_FIRST
                 // to return DOS_EXTERR_NO_MORE_FILES (e.g. LapLink 5)
@@ -510,14 +463,14 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 break;
             }
             std::error_code ec;
-            const bool is_root_dir = std::filesystem::equivalent(path, share.get_root(), ec);
+            const bool is_root_dir = std::filesystem::equivalent(path, drive_info.get_root(), ec);
             if (ec) {
                 dbg_print("is_root_dir: {}\n", ec.message());
                 *ax = to_little16(DOS_EXTERR_NO_MORE_FILES);
                 break;
             }
             DosFileProperties properties;
-            if (!fs.find_file(properties, handle, *fcbmask, fattr, fpos, is_root_dir, share.is_on_fat())) {
+            if (!fs.find_file(properties, handle, *fcbmask, fattr, fpos, is_root_dir, drive_info.is_on_fat())) {
                 dbg_print("No more matching files found\n");
                 *ax = to_little16(DOS_EXTERR_NO_MORE_FILES);
             } else {
@@ -579,8 +532,8 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const uint16_t action_code = from_little16(request->action);
             const uint16_t ext_open_create_open_mode = from_little16(request->mode);
 
-            const auto path = share.get_root() / create_relative_path(request_data + 6, request_data_len - 6);
-            const auto directory = share.get_root() / path.parent_path();
+            const auto path = drive_info.get_root() / create_relative_path(request_data + 6, request_data_len - 6);
+            const auto directory = drive_info.get_root() / path.parent_path();
 
             dbg_print("OPEN/CREATE/EXTENDED_OPEN_CREATE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
             std::error_code ec;
@@ -604,13 +557,13 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         dbg_print("OPEN_FILE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
                         result_open_mode = stack_attr & 0xFF;
                         // check that item exists, and is neither a volume nor a directory
-                        const auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
+                        const auto attr = get_path_dos_properties(path, &properties, drive_info.is_on_fat());
                         if (attr == 0xFF || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
                             error = true;
                         }
                     } else if (function == INT2F_CREATE_FILE) {
                         dbg_print("CREATE_FILE \"{}\", stack_attr=0x{:04X}\n", path.string(), stack_attr);
-                        properties = create_or_truncate_file(path, stack_attr & 0xFF, share.is_on_fat());
+                        properties = create_or_truncate_file(path, stack_attr & 0xFF, drive_info.is_on_fat());
                         result_open_mode = 2;  // read/write
                     } else {
                         dbg_print(
@@ -621,14 +574,14 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             action_code,
                             ext_open_create_open_mode);
 
-                        const auto attr = get_path_dos_properties(path, &properties, share.is_on_fat());
+                        const auto attr = get_path_dos_properties(path, &properties, drive_info.is_on_fat());
                         result_open_mode =
                             ext_open_create_open_mode & 0x7f;  // etherdfs says: that's what PHANTOM.C does
                         if (attr == FAT_ERROR_ATTR) {          // file not found
                             dbg_print("File doesn't exist -> ");
                             if ((action_code & IF_NOT_EXIST_MASK) == ACTION_CODE_CREATE_IF_NOT_EXIST) {
                                 dbg_print("create file\n");
-                                properties = create_or_truncate_file(path, stack_attr & 0xFF, share.is_on_fat());
+                                properties = create_or_truncate_file(path, stack_attr & 0xFF, drive_info.is_on_fat());
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_CREATED;
                             } else {
                                 dbg_print("fail\n");
@@ -644,7 +597,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
                             } else if ((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST) {
                                 dbg_print("truncate file\n");
-                                properties = create_or_truncate_file(path, stack_attr & 0xFF, share.is_on_fat());
+                                properties = create_or_truncate_file(path, stack_attr & 0xFF, drive_info.is_on_fat());
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_TRUNCATED;
                             } else {
                                 dbg_print("fail\n");
@@ -819,13 +772,13 @@ int main(int argc, char ** argv) {
                 print(stdout, "Invalid DOS drive \"{:c}\". Valid drives are in the C - Z range.\n", arg[0]);
                 return -1;
             }
-            auto & share = shares.get_info(drive_char - 'A');
-            if (share.is_used()) {
+            auto & drive_info = fs.get_drives().get_info(drive_char - 'A');
+            if (drive_info.is_shared()) {
                 print(stdout, "Drive \"{:c}\" already in use.\n", drive_char);
                 return -1;
             }
             try {
-                share.set_root(std::filesystem::canonical(arg.substr(2)));
+                drive_info.set_root(std::filesystem::canonical(arg.substr(2)));
             } catch (const std::exception & ex) {
                 print(stderr, "ERROR: failed to resolve path \"{}\": {}\n", arg.substr(2), ex.what());
                 return 1;
@@ -837,8 +790,8 @@ int main(int argc, char ** argv) {
     }
 
     bool drives_defined = false;
-    for (auto & share : shares.get_infos()) {
-        if (share.is_used()) {
+    for (auto & drive_info : fs.get_drives().get_infos()) {
+        if (drive_info.is_shared()) {
             drives_defined = true;
             break;
         }
@@ -865,17 +818,18 @@ int main(int argc, char ** argv) {
 #ifdef __linux__
     bool some_drive_not_fat = false;
 #endif
-    for (std::size_t i = 0; i < shares.get_infos().size(); ++i) {
-        const auto & share = shares.get_info(i);
-        if (!share.is_used()) {
+    for (std::size_t i = 0; i < fs.get_drives().get_infos().size(); ++i) {
+        const auto & drive_info = fs.get_drives().get_info(i);
+        if (!drive_info.is_shared()) {
             continue;
         }
 #ifdef __linux__
-        if (!share.is_on_fat()) {
+        if (!drive_info.is_on_fat()) {
             some_drive_not_fat = true;
         }
 #endif
-        print(stdout, "{:c} {:c}: => {}\n", share.is_on_fat() ? ' ' : '*', 'A' + i, share.get_root().string());
+        print(
+            stdout, "{:c} {:c}: => {}\n", drive_info.is_on_fat() ? ' ' : '*', 'A' + i, drive_info.get_root().string());
     }
 #ifdef __linux__
     if (some_drive_not_fat) {
