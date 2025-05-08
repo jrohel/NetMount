@@ -607,6 +607,12 @@ int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & driv
                     (char *)fprops.fcb_name.ext_blank_padded);
                 directory_list.emplace_back(fprops);
             }
+        } else if (directory_list.size() == 0xFFFFU) {
+            // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
+            err_print(
+                "FilesystemDB::Item::create_directory_list: Directory \"{}\" contains more than 65535 items",
+                path.string());
+            break;
         }
 
         DosFileProperties fprops;
