@@ -200,16 +200,26 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
 }
 
 
-const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) const { return items[handle].path; }
+const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
+    auto & item = items[handle];
+    const auto & path = item.path;
+    if (!path.empty()) {
+        item.update_last_used_timestamp();
+    }
+    return path;
+}
 
 
 int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     long res;
     FILE * fd;
-    const auto & fname = items[handle].path;
+    auto & item = items[handle];
+    const auto & fname = item.path;
     if (fname.empty()) {
         throw std::runtime_error(std::format("Handle {} not found", handle));
     }
+
+    item.update_last_used_timestamp();
 
     fd = fopen(fname.string().c_str(), "rb");
     if (!fd) {
@@ -230,10 +240,13 @@ int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset,
 int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     int32_t res;
     FILE * fd;
-    const auto & fname = items[handle].path;
+    auto & item = items[handle];
+    const auto & fname = item.path;
     if (fname.empty()) {
         throw std::runtime_error(std::format("Handle {} not found", handle));
     }
+
+    item.update_last_used_timestamp();
 
     // len 0 means "truncate" or "extend"
     if (len == 0) {
@@ -263,13 +276,18 @@ int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t 
 
 
 int32_t FilesystemDB::get_file_size(uint16_t handle) {
-    if (items[handle].path.empty()) {
+    auto & item = items[handle];
+    if (item.path.empty()) {
         return -1;
     }
+
     DosFileProperties fprops;
-    if (get_path_dos_properties(items[handle].path, &fprops, 0) == FAT_ERROR_ATTR) {
+    if (get_path_dos_properties(item.path, &fprops, 0) == FAT_ERROR_ATTR) {
         return -1;
     }
+
+    item.update_last_used_timestamp();
+
     return fprops.size;
 }
 
@@ -606,8 +624,13 @@ int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & driv
         directory_list.emplace_back(fprops);
     }
 
+    update_last_used_timestamp();
+
     return directory_list.size();
 }
+
+
+void FilesystemDB::Item::update_last_used_timestamp() { last_used_time = time(NULL); }
 
 
 fcb_file_name short_name_to_fcb(const std::string & short_name) noexcept {

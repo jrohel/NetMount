@@ -117,7 +117,7 @@ public:
     uint16_t get_handle(const std::filesystem::path & server_path);
 
     /// Returns the path to the filesystem item represented by the handle.
-    const std::filesystem::path & get_handle_path(uint16_t handle) const;
+    const std::filesystem::path & get_handle_path(uint16_t handle);
 
     /// Reads `len` bytes from `offset` from the file defined by `handle` to `buffer`.
     /// Returns the number of bytes read
@@ -207,6 +207,8 @@ private:
         // Creates a directory listing for `path`.
         // Returns the number of filesystem entries, or -1 if an error occurs.
         int32_t create_directory_list(const Drives::DriveInfo & drive_info);
+
+        void update_last_used_timestamp();
     };
     std::array<Item, 65535> items;
 
