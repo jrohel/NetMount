@@ -300,7 +300,9 @@ bool FilesystemDB::find_file(
     DosFileProperties & properties,
     uint16_t & nth) {
 
-    if (items[handle].path.empty()) {
+    auto & item = items[handle];
+
+    if (item.path.empty()) {
         err_print("ERROR: FilesystemDB::find_file: handle {} not found\n", handle);
         return false;
     }
@@ -313,15 +315,15 @@ bool FilesystemDB::find_file(
     }
 
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
-    if ((nth == 0) || (items[handle].directory_list.empty())) {
-        const auto count = items[handle].create_directory_list(drive_info);
+    if ((nth == 0) || (item.directory_list.empty())) {
+        const auto count = item.create_directory_list(drive_info);
         if (count < 0) {
-            err_print("ERROR: Failed to scan dir \"{}\"\n", items[handle].path.string());
+            err_print("ERROR: Failed to scan dir \"{}\"\n", item.path.string());
             return false;
 #ifdef DEBUG
         } else {
-            dbg_print("Scanned dir \"{}\", found {} items\n", items[handle].path.string(), count);
-            for (const auto & item : items[handle].directory_list) {
+            dbg_print("Scanned dir \"{}\", found {} items\n", item.path.string(), count);
+            for (const auto & item : item.directory_list) {
                 dbg_print(
                     "  \"{:.8s}{:.3s}\", attr 0x{:02X}, {} bytes\n",
                     reinterpret_cast<const char *>(&item.fcb_name.name_blank_padded),
@@ -334,12 +336,11 @@ bool FilesystemDB::find_file(
     }
 
     DosFileProperties const * found_props{nullptr};
-    uint16_t n = 0;
-    for (const auto & item_props : items[handle].directory_list) {
-        // forward to where we need to start listing
-        if (++n <= nth) {
-            continue;
-        }
+    auto & dir_list = item.directory_list;
+    const auto item_count = dir_list.size();
+    uint16_t n;
+    for (n = nth; n < item_count; ++n) {
+        const auto & item_props = dir_list[n];
 
         // skip '.' and '..' items if directory is root
         if (is_root_dir && item_props.fcb_name.name_blank_padded[0] == '.')
@@ -363,7 +364,7 @@ bool FilesystemDB::find_file(
     }
 
     if (found_props) {
-        nth = n;
+        nth = n + 1;
         properties = *found_props;
         return true;
     }
