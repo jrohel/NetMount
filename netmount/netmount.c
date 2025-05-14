@@ -1489,6 +1489,55 @@ static void __declspec(naked) supported_functions_table(void) {
 }
 
 
+// The PUSHA and POPA instructions are available on 80186 and later processors.
+// On the 8086 processor, we emulate them using a sequence of PUSH and POP instructions.
+// Cannot use multi-line macro. So we have a macro for each instruction.
+#if _M_IX86 >= 100
+
+#define PUSH_ALL pusha
+#define POP_ALL  popa
+
+#define PUSH_AX
+#define PUSH_CX
+#define PUSH_DX
+#define PUSH_BX
+#define PUSH_SP
+#define PUSH_BP
+#define PUSH_SI
+#define PUSH_DI
+
+#define POP_DI
+#define POP_SI
+#define POP_BP
+#define POP_AX
+#define POP_BX
+#define POP_DX
+#define POP_CX
+#define POP_AX
+
+#else
+
+#define PUSH_ALL
+#define POP_ALL
+
+#define PUSH_AX push ax
+#define PUSH_CX push cx
+#define PUSH_DX push dx
+#define PUSH_BX push bx
+#define PUSH_SP push sp
+#define PUSH_BP push bp
+#define PUSH_SI push si
+#define PUSH_DI push di
+
+#define POP_DI pop di
+#define POP_SI pop si
+#define POP_BP pop bp
+#define POP_AX pop ax
+#define POP_BX pop bx
+#define POP_DX pop dx
+#define POP_CX pop cx
+#endif
+
 // The int2F_redirector is our 2F interrupt handler. It assesses whether the call is destined for our drive.
 // If so, it will call our routine - handle_request_for_our_drive. If not, it calls the original interrupt handler.
 static void __declspec(naked) int2F_redirector(void) {
@@ -1621,14 +1670,19 @@ static void __declspec(naked) int2F_redirector(void) {
         pop bx
 
     use_our_handler:
-        push ax
-        push cx
-        push dx
-        push bx
-        push sp
-        push bp
-        push si
-        push di
+        // Macro defined for 80186 and later processors
+        PUSH_ALL
+
+        // Macros defined only for the 8086 processor
+        PUSH_AX
+        PUSH_CX
+        PUSH_DX
+        PUSH_BX
+        PUSH_SP
+        PUSH_BP
+        PUSH_SI
+        PUSH_DI
+
         push ds
         push es
 
@@ -1655,14 +1709,20 @@ static void __declspec(naked) int2F_redirector(void) {
 
         pop es
         pop ds
-        pop di
-        pop si
-        pop bp
-        pop ax  // no POP SP here, it does ADD SP, 2 (AX will be overwritten later)
-        pop bx
-        pop dx
-        pop cx
-        pop ax
+
+        // Macro defined for 80186 and later processors
+        POP_ALL
+
+        // Macros defined only for the 8086 processor
+        POP_DI
+        POP_SI
+        POP_BP
+        POP_AX  // no POP SP here, it does ADD SP, 2 (AX will be overwritten later)
+        POP_BX
+        POP_DX
+        POP_CX
+        POP_AX
+
         iret
 
     invalid_drive_no:
