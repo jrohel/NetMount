@@ -59,6 +59,8 @@ Arguments:
 /?                        Display this help
 ```
 
+[More info about the client](CLIENT.md)
+
 -----
 ## `netmount-server` (Directory Sharing Server)
 - A cross-platform user-space application that shares directories over the network.
@@ -84,6 +86,8 @@ Options:
   <drive>=<root_path>         drive - DOS drive C-Z, root_path - paths to serve
   <name_conversion>=<method>  file name conversion method - OFF, RAM (RAM by default)
 ```
+
+[More info about the server](SERVER.md)
 
 -----
 ## Motivation
