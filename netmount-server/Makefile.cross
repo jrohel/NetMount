@@ -36,8 +36,7 @@ $(NAME)-linux-aarch64: $(SOURCES) $(HEADERS)
 
 $(NAME)-linux-aarch64be: $(SOURCES) $(HEADERS)
 	echo 'Compiling for Linux big endian ARM64-bit...'
-	/aarch64be--musl--stable-2024.05-1/bin/a
-	arch64_be-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
+	/aarch64be--musl--stable-2024.05-1/bin/aarch64_be-linux-g++ $(CPPFLAGS) $(LDFLAGS) $(SOURCES) -o $@
 
 $(NAME)-linux-i686: $(SOURCES) $(HEADERS)
 	echo 'Compiling for Linux i686...'
