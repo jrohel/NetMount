@@ -1,3 +1,11 @@
+# 1.5.0
+
+## Features
+
+- UNINSTALL command added - Uninstalls NetMount and deallocates its memory.
+
+----
+
 # 1.4.0
 
 ## Features
