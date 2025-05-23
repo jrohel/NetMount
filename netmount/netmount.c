@@ -54,6 +54,7 @@
 
 #define NETWORK_ERROR 0xFFFFU
 
+typedef void(__interrupt * interrupt_handler)(void);
 
 #define MAX_DRIVERS_COUNT 26
 struct shared_data {
@@ -88,14 +89,17 @@ struct shared_data {
     union ipv4_addr last_remote_ip;
     uint16_t last_remote_udp_port;
     volatile uint8_t server_response_received;  // 1 - if response in global_recv_buff
+
+    // Used only for uninstall
+    uint16_t psp_segment;
+    void * int2F_redirector_offset;
+    interrupt_handler orig_INT2F_handler;
+    interrupt_handler pktdrv_INT_handler;
 };
 
-#define SHARED_DATA_SIZE 281  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 293  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
-
-
-typedef void(__interrupt * interrupt_handler)(void);
 
 
 static void * get_offset(const void * func);
@@ -1911,6 +1915,18 @@ static void terminate_remain_resident(uint8_t exit_code, uint16_t memsize_in_par
     "int 0x21" parm[al][dx]
 
 
+static uint16_t get_current_psp_address_segment(void);
+#pragma aux get_current_psp_address_segment = \
+    "mov ah, 0x62"                            \
+    "int 0x21" modify exact[ah bx] value[bx]
+
+
+static uint16_t free_memory(uint16_t segment);
+#pragma aux free_memory = \
+    "mov ah, 0x49"        \
+    "int 0x21" parm[es] modify exact[ax] value[ax]
+
+
 static uint16_t get_CS(void);
 #pragma aux get_CS = "mov ax, cs" modify exact[ax] value[ax]
 
@@ -2182,10 +2198,13 @@ static void print_help(void) {
                         "\r\n"
                         "NETMOUNT UMOUNT /ALL\r\n"
                         "\r\n"
+                        "NETMOUNT UNINSTALL\r\n"
+                        "\r\n"
                         "Commands:\r\n"
                         "INSTALL                   Installs NetMount as resident (TSR)\r\n"
                         "MOUNT                     Mounts remote drive as local drive\r\n"
                         "UMOUNT                    Unmounts local drive(s) from remote drive\r\n"
+                        "UNINSTALL                 Uninstall NetMount\r\n"
                         "\r\n"
                         "Arguments:\r\n"
                         "/IP:<local_ipv4_addr>     Sets local IP address\r\n"
@@ -2232,8 +2251,48 @@ int main(int argc, char * argv[]) {
         return EXIT_UNKNOWN_CMD;
     }
 
-    // install /IP:<local_ipv4_addr> [/MASK:<ipv4_net_mask>] [/GW:<gateway_ipv4_addr>] [/PORT:<udp_port>]
-    // [/PKT_INT:<packet_driver_int>] [/NO_ARP_REQUESTS]
+    if (strn_upper_cmp(argv[1], "UNINSTALL", 10) == 0) {
+        const struct install_info info = get_install_info();
+        if (!info.installed) {
+            my_print_dos_string("NetMount is not installed.\r\n$");
+            return EXIT_NOT_INSTALLED;
+        }
+
+        if (argc != 2) {
+            my_print_dos_string("Uninstall does not take additional arguments\r\n$");
+            return EXIT_BAD_ARG;
+        }
+
+        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
+
+        interrupt_handler current_INT2F_handler = get_intr_vector(0x2F);
+        if (current_INT2F_handler != MK_FP(shared_data_ptr->psp_segment, shared_data_ptr->int2F_redirector_offset)) {
+            my_print_dos_string("NetMount cannot be removed: not last in INT 2Fh chain\r\n$");
+            return EXIT_NOT_LAST_IN_INT2F_CHAIN;
+        }
+
+        for (int drive_no = 0; drive_no < MAX_DRIVERS_COUNT; ++drive_no) {
+            if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
+                my_print_dos_string("NetMount cannot be removed: mounted drives detected\r\n$");
+                return EXIT_DRIVE_MOUNTED;
+            }
+        }
+
+        // Restore original interrupt 0x2F handler
+        set_intr_vector(0x2F, shared_data_ptr->orig_INT2F_handler);
+
+        // Reload global_pktdrv_INT_handler from shared memory
+        *getptr_global_pktdrv_INT_handler() = shared_data_ptr->pktdrv_INT_handler;
+
+        // Unregister handlers from the packet driver
+        pktdrv_release_type(shared_data_ptr->ipv4_pkthandle);
+        pktdrv_release_type(shared_data_ptr->arp_pkthandle);
+
+        free_memory(shared_data_ptr->psp_segment);
+
+        return EXIT_OK;
+    }
+
     if (strn_upper_cmp(argv[1], "INSTALL", 8) == 0) {
         if (!is_redir_install_allowed()) {
             my_print_dos_string("Redirector installation has been forbidden either by DOS or another process.\r\n$");
@@ -2429,6 +2488,13 @@ int main(int argc, char * argv[]) {
             my_print_string(buf);
             my_print_dos_string("\r\n$");
         }
+
+        // This data is saved to a shared area and is used by UNINSTALL.
+        getptr_shared_data()->psp_segment = get_current_psp_address_segment();
+        getptr_shared_data()->orig_INT2F_handler = *getptr_global_orig_INT2F_handler();
+        getptr_shared_data()->int2F_redirector_offset = get_offset(int2F_redirector);
+        getptr_shared_data()->pktdrv_INT_handler = *getptr_global_pktdrv_INT_handler();
+
         terminate_remain_resident(EXIT_OK, ((unsigned)get_offset(resident_part_end_mark) + PROGRAM_OFFSET + 15) >> 4);
     }
 

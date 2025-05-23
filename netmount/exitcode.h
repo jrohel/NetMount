@@ -26,5 +26,7 @@
 #define EXIT_DRIVE_LETTER_ALREADY_USED   -6
 #define EXIT_NOT_FREE_SLOT_FOR_REMOTE_IP -7
 #define EXIT_DRIVE_NOT_MOUNTED           -8
+#define EXIT_DRIVE_MOUNTED               -9
+#define EXIT_NOT_LAST_IN_INT2F_CHAIN     -10
 
 #endif

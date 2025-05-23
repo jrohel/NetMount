@@ -33,10 +33,13 @@ NETMOUNT UMOUNT <local_drive_letter>
 
 NETMOUNT UMOUNT /ALL
 
+NETMOUNT UNINSTALL
+
 Commands:
 INSTALL                   Installs NetMount as resident (TSR)
 MOUNT                     Mounts remote drive as local drive
 UMOUNT                    Unmounts local drive(s) from remote drive
+UNINSTALL                 Uninstall NetMount
 
 Arguments:
 /IP:<local_ipv4_addr>     Sets local IP address

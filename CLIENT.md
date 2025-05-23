@@ -25,10 +25,13 @@ NETMOUNT UMOUNT <local_drive_letter>
 
 NETMOUNT UMOUNT /ALL
 
+NETMOUNT UNINSTALL
+
 Commands:
 INSTALL                   Installs NetMount as resident (TSR)
 MOUNT                     Mounts remote drive as local drive
 UMOUNT                    Unmounts local drive(s) from remote drive
+UNINSTALL                 Uninstall NetMount
 
 Arguments:
 /IP:<local_ipv4_addr>     Sets local IP address
@@ -103,6 +106,15 @@ drives than necessary wastes memory.
 5. **Unmount all remaining shares**
 
     `netmount umount /ALL`
+
+6. **Uninstall NetMount**
+
+    `netmount uninstall`
+
+    NetMount can only be uninstalled when no drives are mounted and it is the last handler
+    in the INT 2Fh interrupt chain. If either condition is not met, an error is reported.
+    If another program has hooked INT 2Fh after NetMount, its handler must be removed first.
+
 
 ## MTU
 
