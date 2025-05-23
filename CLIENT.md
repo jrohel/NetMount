@@ -161,3 +161,19 @@ fragments, increasing protocol overhead and reducing transmission speed.
 
 In our case, if only NetMount is communicating over the serial link, it's more efficient to use larger frames.
 The only limitation is the maximum packet size supported by the Packet Driver and the remote server.
+
+
+## Memory Usage
+
+NetMount does not perform any dynamic memory allocation. All variables, buffers, and stacks
+are statically defined and embedded directly in the executable image. The codebase is
+logically split into two parts:
+
+- The first part, the TSR (Terminate and Stay Resident) component, remains in memory
+  after installation.
+
+- The second part includes routines for installation, uninstallation, mounting and unmounting
+  drives, and displaying help. This portion is released after execution.
+
+Only the TSR component stays resident, occupying a single contiguous memory block.
+
