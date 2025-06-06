@@ -229,9 +229,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto * const request = reinterpret_cast<const drive_proto_closef *>(request_data);
             const uint16_t handle = from_little16(request->start_cluster);
             dbg_print("CLOSE_FILE handle {}\n", handle);
-            const auto & path = fs.get_handle_path(handle);
-            if (path.empty()) {
-                err_print("ERROR: CLOSE_FILE handle {} not found", handle);
+            try {
+                fs.get_handle_path(handle);
+            } catch (const std::runtime_error & ex) {
+                err_print("ERROR: CLOSE_FILE: {}\n", ex.what());
                 // TODO: Send error to client?
             }
         } break;
@@ -290,9 +291,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto * const request = reinterpret_cast<const drive_proto_lockf *>(request_data);
             const uint16_t handle = from_little16(request->start_cluster);
             dbg_print("LOCK_UNLOCK_FILE handle {}\n", handle);
-            const auto & path = fs.get_handle_path(handle);
-            if (path.empty()) {
-                err_print("ERROR: LOCK_UNLOCK_FILE handle {} not found", handle);
+            try {
+                fs.get_handle_path(handle);
+            } catch (const std::runtime_error & ex) {
+                err_print("ERROR: LOCK_UNLOCK_FILE: {}\n", ex.what());
                 // TODO: Send error to client?
             }
         } break;
@@ -492,30 +494,29 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 handle,
                 fcb_file_name_to_cstr(*fcbmask),
                 fattr);
-            const auto & path = fs.get_handle_path(handle);
-            if (path.empty()) {
-                err_print("ERROR: FIND_NEXT handle {} not found\n", handle);
+            try {
+                DosFileProperties properties;
+                if (!fs.find_file(drive_info, handle, *fcbmask, fattr, properties, fpos)) {
+                    dbg_print("No more matching files found\n");
+                    *ax = to_little16(DOS_EXTERR_NO_MORE_FILES);
+                } else {
+                    dbg_print(
+                        "Found file: FCB \"{}\", attrs 0x{:02X}\n",
+                        fcb_file_name_to_cstr(properties.fcb_name),
+                        properties.attrs);
+                    auto * const reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
+                    reply->attrs = properties.attrs;
+                    reply->name = properties.fcb_name;
+                    reply->time = to_little16(properties.time_date);
+                    reply->date = to_little16(properties.time_date >> 16);
+                    reply->size = to_little32(properties.size);
+                    reply->start_cluster = to_little16(handle);
+                    reply->dir_entry = to_little16(fpos);
+                    reply_packet_len = sizeof(drive_proto_find_reply);
+                }
+            } catch (const std::runtime_error & ex) {
+                err_print("ERROR: FIND_NEXT: {}\n", ex.what());
                 *ax = to_little16(DOS_EXTERR_NO_MORE_FILES);
-                break;
-            }
-            DosFileProperties properties;
-            if (!fs.find_file(drive_info, handle, *fcbmask, fattr, properties, fpos)) {
-                dbg_print("No more matching files found\n");
-                *ax = to_little16(DOS_EXTERR_NO_MORE_FILES);
-            } else {
-                dbg_print(
-                    "Found file: FCB \"{}\", attrs 0x{:02X}\n",
-                    fcb_file_name_to_cstr(properties.fcb_name),
-                    properties.attrs);
-                auto * const reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
-                reply->attrs = properties.attrs;
-                reply->name = properties.fcb_name;
-                reply->time = to_little16(properties.time_date);
-                reply->date = to_little16(properties.time_date >> 16);
-                reply->size = to_little32(properties.size);
-                reply->start_cluster = to_little16(handle);
-                reply->dir_entry = to_little16(fpos);
-                reply_packet_len = sizeof(drive_proto_find_reply);
             }
         } break;
 

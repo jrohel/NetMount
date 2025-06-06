@@ -195,6 +195,8 @@ public:
     std::pair<uint64_t, uint64_t> space_info(uint8_t drive_num);
 
 private:
+    constexpr static uint16_t MAX_HANDLE_COUNT = 0xFFFFU;
+
     Drives drives;
     std::filesystem::path root;
     class Item {
@@ -210,7 +212,9 @@ private:
 
         void update_last_used_timestamp();
     };
-    std::array<Item, 65535> items;
+    std::vector<Item> items;
+
+    Item & get_item(uint16_t handle);
 
     const std::filesystem::path & get_server_name(
         const Drives::DriveInfo & drive_info,

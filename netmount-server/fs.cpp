@@ -185,11 +185,17 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
         }
     }
 
-    // not found - if no free slot available, pick the oldest one and replace it
     if (first_free == items.size()) {
-        items[oldest].path.clear();
-        items[oldest].directory_list = {};
-        first_free = oldest;
+        // not found - no free slot available
+        if (first_free < MAX_HANDLE_COUNT) {
+            // allocate new slot
+            items.resize(first_free + 1);
+        } else {
+            // all handles are used, pick the oldest one and replace it
+            items[oldest].path.clear();
+            items[oldest].directory_list = {};
+            first_free = oldest;
+        }
     }
 
     // assign item to handle
@@ -200,12 +206,23 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
 }
 
 
-const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
-    auto & item = items[handle];
-    const auto & path = item.path;
-    if (!path.empty()) {
-        item.update_last_used_timestamp();
+FilesystemDB::Item & FilesystemDB::get_item(uint16_t handle) {
+    if (handle >= items.size()) {
+        throw std::runtime_error(
+            std::format("Handle {} is invalid - only {} handles are currently allocated", handle, items.size()));
     }
+    Item & item = items[handle];
+    if (item.path.empty()) {
+        throw std::runtime_error(std::format("Handle {} is invalid because it is empty", handle));
+    }
+    return item;
+}
+
+
+const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
+    auto & item = get_item(handle);
+    const auto & path = item.path;
+    item.update_last_used_timestamp();
     return path;
 }
 
@@ -213,11 +230,8 @@ const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
 int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     long res;
     FILE * fd;
-    auto & item = items[handle];
+    auto & item = get_item(handle);
     const auto & fname = item.path;
-    if (fname.empty()) {
-        throw std::runtime_error(std::format("Handle {} not found", handle));
-    }
 
     item.update_last_used_timestamp();
 
@@ -240,11 +254,8 @@ int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset,
 int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     int32_t res;
     FILE * fd;
-    auto & item = items[handle];
+    auto & item = get_item(handle);
     const auto & fname = item.path;
-    if (fname.empty()) {
-        throw std::runtime_error(std::format("Handle {} not found", handle));
-    }
 
     item.update_last_used_timestamp();
 
@@ -276,10 +287,7 @@ int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t 
 
 
 int32_t FilesystemDB::get_file_size(uint16_t handle) {
-    auto & item = items[handle];
-    if (item.path.empty()) {
-        return -1;
-    }
+    auto & item = get_item(handle);
 
     DosFileProperties fprops;
     if (get_path_dos_properties(item.path, &fprops, 0) == FAT_ERROR_ATTR) {
@@ -300,12 +308,7 @@ bool FilesystemDB::find_file(
     DosFileProperties & properties,
     uint16_t & nth) {
 
-    auto & item = items[handle];
-
-    if (item.path.empty()) {
-        err_print("ERROR: FilesystemDB::find_file: handle {} not found\n", handle);
-        return false;
-    }
+    auto & item = get_item(handle);
 
     std::error_code ec;
     const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), drive_info.get_root(), ec);
