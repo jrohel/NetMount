@@ -120,8 +120,7 @@ Supported `<method>` are `RAM` and `OFF`. The default is `RAM`. `OFF` turns off 
 - the file system is case insensitive or the file names are all lowercase.
 
 The argument is separated by a comma. If there is a comma in the path to the shared directory, use
-the '\' character as an escape. Do not share the same directory with different `name_conversion` using
-the same server process!
+the '\' character as an escape.
 
 Example usage:
 

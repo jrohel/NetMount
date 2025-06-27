@@ -141,7 +141,7 @@ uint32_t time_to_fat(time_t t) {
 }  // namespace
 
 
-void Drives::DriveInfo::set_root(std::filesystem::path root) {
+void Drive::set_root(std::filesystem::path root) {
     if (used) {
         throw std::runtime_error("already used");
     }
@@ -151,7 +151,7 @@ void Drives::DriveInfo::set_root(std::filesystem::path root) {
 }
 
 
-uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
+uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
     uint16_t first_free = items.size();
     uint16_t oldest = 0;
     const time_t now = time(NULL);
@@ -206,7 +206,7 @@ uint16_t FilesystemDB::get_handle(const std::filesystem::path & server_path) {
 }
 
 
-FilesystemDB::Item & FilesystemDB::get_item(uint16_t handle) {
+Drive::Item & Drive::get_item(uint16_t handle) {
     if (handle >= items.size()) {
         throw std::runtime_error(
             std::format("Handle {} is invalid - only {} handles are currently allocated", handle, items.size()));
@@ -219,7 +219,7 @@ FilesystemDB::Item & FilesystemDB::get_item(uint16_t handle) {
 }
 
 
-const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
+const std::filesystem::path & Drive::get_handle_path(uint16_t handle) {
     auto & item = get_item(handle);
     const auto & path = item.path;
     item.update_last_used_timestamp();
@@ -227,7 +227,7 @@ const std::filesystem::path & FilesystemDB::get_handle_path(uint16_t handle) {
 }
 
 
-int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
+int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     long res;
     FILE * fd;
     auto & item = get_item(handle);
@@ -251,7 +251,7 @@ int32_t FilesystemDB::read_file(void * buffer, uint16_t handle, uint32_t offset,
 }
 
 
-int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
+int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     int32_t res;
     FILE * fd;
     auto & item = get_item(handle);
@@ -286,7 +286,7 @@ int32_t FilesystemDB::write_file(const void * buffer, uint16_t handle, uint32_t 
 }
 
 
-int32_t FilesystemDB::get_file_size(uint16_t handle) {
+int32_t Drive::get_file_size(uint16_t handle) {
     auto & item = get_item(handle);
 
     DosFileProperties fprops;
@@ -300,18 +300,13 @@ int32_t FilesystemDB::get_file_size(uint16_t handle) {
 }
 
 
-bool FilesystemDB::find_file(
-    const Drives::DriveInfo & drive_info,
-    uint16_t handle,
-    const fcb_file_name & tmpl,
-    unsigned char attr,
-    DosFileProperties & properties,
-    uint16_t & nth) {
+bool Drive::find_file(
+    uint16_t handle, const fcb_file_name & tmpl, unsigned char attr, DosFileProperties & properties, uint16_t & nth) {
 
     auto & item = get_item(handle);
 
     std::error_code ec;
-    const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), drive_info.get_root(), ec);
+    const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), get_root(), ec);
     if (ec) {
         dbg_print("find_file: {}\n", ec.message());
         return false;
@@ -319,7 +314,7 @@ bool FilesystemDB::find_file(
 
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (item.directory_list.empty())) {
-        const auto count = item.create_directory_list(drive_info);
+        const auto count = item.create_directory_list(*this);
         if (count < 0) {
             err_print("ERROR: Failed to scan dir \"{}\"\n", item.path.string());
             return false;
@@ -376,12 +371,12 @@ bool FilesystemDB::find_file(
 }
 
 
-const std::filesystem::path & FilesystemDB::get_server_name(
-    const Drives::DriveInfo & drive_info, uint16_t handle, const fcb_file_name & fcb_name, bool create_directory_list) {
+const std::filesystem::path & Drive::get_server_name(
+    uint16_t handle, const fcb_file_name & fcb_name, bool create_directory_list) {
     static const std::filesystem::path empty_path;
     auto & item = items[handle];
     if (create_directory_list || item.directory_list.empty()) {
-        item.create_directory_list(drive_info);
+        item.create_directory_list(*this);
     }
     for (auto & dir : item.directory_list) {
         if (dir.fcb_name == fcb_name) {
@@ -392,16 +387,15 @@ const std::filesystem::path & FilesystemDB::get_server_name(
 }
 
 
-std::pair<std::filesystem::path, bool> FilesystemDB::create_server_path(
-    uint8_t drive_num, const std::filesystem::path & client_path, bool create_directory_list) {
-    const auto & drive_info = drives.get_info(drive_num);
-    const auto & root = drive_info.get_root();
+std::pair<std::filesystem::path, bool> Drive::create_server_path(
+    const std::filesystem::path & client_path, bool create_directory_list) {
+    const auto & root = get_root();
 
     if (client_path.empty()) {
         return {root, true};
     }
 
-    if (drive_info.get_file_name_conversion() == Drives::DriveInfo::FileNameConversion::OFF) {
+    if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
         auto server_path = root / client_path;
         return {server_path, std::filesystem::exists(server_path)};
     }
@@ -411,7 +405,7 @@ std::pair<std::filesystem::path, bool> FilesystemDB::create_server_path(
     auto it_end = client_path.end();
     while (true) {
         const fcb_file_name fcb_name = short_name_to_fcb(it->string());
-        auto & server_name = get_server_name(drive_info, get_handle(server_path), fcb_name, create_directory_list);
+        auto & server_name = get_server_name(get_handle(server_path), fcb_name, create_directory_list);
         auto prev_it = it;
         ++it;
         if (server_name.empty()) {
@@ -429,32 +423,32 @@ std::pair<std::filesystem::path, bool> FilesystemDB::create_server_path(
 }
 
 
-void FilesystemDB::make_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
-    auto [server_path, exist] = create_server_path(drive_num, client_path);
+void Drive::make_dir(const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(client_path);
     if (exist) {
         throw std::runtime_error("make_dir: Directory exists: " + server_path.string());
     }
     netmount_srv::make_dir(server_path);
 
     // Recreates directory_list
-    create_server_path(drive_num, client_path, true);
+    create_server_path(client_path, true);
 }
 
 
-void FilesystemDB::delete_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
-    auto [server_path, exist] = create_server_path(drive_num, client_path);
+void Drive::delete_dir(const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(client_path);
     if (!exist) {
         throw std::runtime_error("delete_dir: Directory does not exist: " + server_path.string());
     }
     netmount_srv::delete_dir(server_path);
 
     // Recreates directory_list
-    create_server_path(drive_num, client_path, true);
+    create_server_path(client_path, true);
 }
 
 
-void FilesystemDB::change_dir(uint8_t drive_num, const std::filesystem::path & client_path) {
-    auto [server_path, exist] = create_server_path(drive_num, client_path);
+void Drive::change_dir(const std::filesystem::path & client_path) {
+    auto [server_path, exist] = create_server_path(client_path);
     if (!exist) {
         throw std::runtime_error("change_dir: Directory does not exist: " + server_path.string());
     }
@@ -462,48 +456,45 @@ void FilesystemDB::change_dir(uint8_t drive_num, const std::filesystem::path & c
 }
 
 
-void FilesystemDB::set_item_attrs(uint8_t drive_num, const std::filesystem::path & client_path, uint8_t attrs) {
-    const auto & drive_info = drives.get_info(drive_num);
-    if (drive_info.is_on_fat()) {
-        auto [server_path, exist] = create_server_path(drive_num, client_path);
+void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t attrs) {
+    if (is_on_fat()) {
+        auto [server_path, exist] = create_server_path(client_path);
         netmount_srv::set_item_attrs(server_path, attrs);
 
         // Recreates directory_list
-        create_server_path(drive_num, client_path, true);
+        create_server_path(client_path, true);
     }
 }
 
 
-uint8_t FilesystemDB::get_dos_properties(
-    uint8_t drive_num, const std::filesystem::path & client_path, DosFileProperties * properties) {
-    const auto & drive_info = drives.get_info(drive_num);
-    auto [server_path, exist] = create_server_path(drive_num, client_path);
-    return get_server_path_dos_properties(drive_info, server_path, properties);
+uint8_t Drive::get_dos_properties(
+    const std::filesystem::path & client_path, DosFileProperties * properties) {
+    auto [server_path, exist] = create_server_path(client_path);
+    return get_server_path_dos_properties(server_path, properties);
 }
 
 
-uint8_t FilesystemDB::get_server_path_dos_properties(
-    const Drives::DriveInfo & drive_info, const std::filesystem::path & server_path, DosFileProperties * properties) {
-    return get_path_dos_properties(server_path, properties, drive_info.is_on_fat());
+uint8_t Drive::get_server_path_dos_properties(
+    const std::filesystem::path & server_path, DosFileProperties * properties) {
+    return get_path_dos_properties(server_path, properties, is_on_fat());
 }
 
 
-void FilesystemDB::rename_file(
-    uint8_t drive_num, const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
-    const auto [old_server_path, exist1] = create_server_path(drive_num, old_client_path);
-    const auto [new_server_path, exist2] = create_server_path(drive_num, new_client_path);
+void Drive::rename_file(
+    const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
+    const auto [old_server_path, exist1] = create_server_path(old_client_path);
+    const auto [new_server_path, exist2] = create_server_path(new_client_path);
     netmount_srv::rename_file(old_server_path, new_server_path);
 
     // Recreates directory_list
-    create_server_path(drive_num, new_client_path, true);
+    create_server_path(new_client_path, true);
 }
 
 
-void FilesystemDB::delete_files(uint8_t drive_num, const std::filesystem::path & client_pattern) {
-    const auto & drive_info = drives.get_info(drive_num);
-    const auto [server_path, exist] = create_server_path(drive_num, client_pattern);
+void Drive::delete_files(const std::filesystem::path & client_pattern) {
+    const auto [server_path, exist] = create_server_path(client_pattern);
 
-    if (get_path_dos_properties(server_path, NULL, drive_info.is_on_fat()) & FAT_RO) {
+    if (get_path_dos_properties(server_path, NULL, is_on_fat()) & FAT_RO) {
         throw FilesystemError("Access denied: Read only FAT file system", DOS_EXTERR_ACCESS_DENIED);
     }
 
@@ -531,7 +522,7 @@ void FilesystemDB::delete_files(uint8_t drive_num, const std::filesystem::path &
 
     const auto filfcb = short_name_to_fcb(filemask);
 
-    if (drive_info.get_file_name_conversion() == Drives::DriveInfo::FileNameConversion::OFF) {
+    if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
         // If file name conversion is turned off, we traverse the file system directly.
         for (const auto & dentry : std::filesystem::directory_iterator(directory)) {
             if (dentry.is_directory()) {
@@ -573,15 +564,13 @@ void FilesystemDB::delete_files(uint8_t drive_num, const std::filesystem::path &
 }
 
 
-DosFileProperties FilesystemDB::create_or_truncate_file(
-    uint8_t drive_num, const std::filesystem::path & server_path, uint8_t attrs) {
-    const auto & drive_info = drives.get_info(drive_num);
-    return netmount_srv::create_or_truncate_file(server_path, attrs, drive_info.is_on_fat());
+DosFileProperties Drive::create_or_truncate_file(const std::filesystem::path & server_path, uint8_t attrs) {
+    return netmount_srv::create_or_truncate_file(server_path, attrs, is_on_fat());
 }
 
 
-std::pair<uint64_t, uint64_t> FilesystemDB::space_info(uint8_t drive_num) {
-    const auto & root = drives.get_info(drive_num).get_root();
+std::pair<uint64_t, uint64_t> Drive::space_info() {
+    const auto & root = get_root();
     if (root.empty()) {
         throw std::runtime_error("space_info: Not shared drive");
     }
@@ -589,7 +578,7 @@ std::pair<uint64_t, uint64_t> FilesystemDB::space_info(uint8_t drive_num) {
 }
 
 
-int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & drive_info) {
+int32_t Drive::Item::create_directory_list(const Drive & drive) {
     directory_list.clear();
     fcb_names.clear();
 
@@ -598,9 +587,9 @@ int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & driv
             for (const auto name : {".", ".."}) {
                 const auto fullpath = path / name;
                 DosFileProperties fprops;
-                get_path_dos_properties(fullpath, &fprops, drive_info.is_on_fat());
+                get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
                 fprops.fcb_name = short_name_to_fcb(name);
-                if (drive_info.get_file_name_conversion() != Drives::DriveInfo::FileNameConversion::OFF) {
+                if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
                     fprops.server_name = name;
                 }
                 dbg_print(
@@ -621,8 +610,8 @@ int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & driv
         DosFileProperties fprops;
         auto path = dentry.path();
         auto filename = path.filename();
-        get_path_dos_properties(path, &fprops, drive_info.is_on_fat());
-        if (drive_info.get_file_name_conversion() != Drives::DriveInfo::FileNameConversion::OFF) {
+        get_path_dos_properties(path, &fprops, drive.is_on_fat());
+        if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
             file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
             fprops.server_name = filename;
         }
@@ -640,7 +629,7 @@ int32_t FilesystemDB::Item::create_directory_list(const Drives::DriveInfo & driv
 }
 
 
-void FilesystemDB::Item::update_last_used_timestamp() { last_used_time = time(NULL); }
+void Drive::Item::update_last_used_timestamp() { last_used_time = time(NULL); }
 
 
 fcb_file_name short_name_to_fcb(const std::string & short_name) noexcept {
