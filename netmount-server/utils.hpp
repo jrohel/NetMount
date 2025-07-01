@@ -91,4 +91,36 @@ inline std::uint32_t from_little32(std::uint32_t little_value) {
     return byte_swap32(little_value);
 }
 
+
+inline std::uint16_t to_big16(std::uint16_t host_value) {
+    if constexpr (std::endian::native == std::endian::big) {
+        return host_value;
+    }
+    return byte_swap16(host_value);
+}
+
+
+inline std::uint32_t to_big32(std::uint32_t host_value) {
+    if constexpr (std::endian::native == std::endian::big) {
+        return host_value;
+    }
+    return byte_swap32(host_value);
+}
+
+
+inline std::uint16_t from_big16(std::uint16_t little_value) {
+    if constexpr (std::endian::native == std::endian::big) {
+        return little_value;
+    }
+    return byte_swap16(little_value);
+}
+
+
+inline std::uint32_t from_big32(std::uint32_t little_value) {
+    if constexpr (std::endian::native == std::endian::big) {
+        return little_value;
+    }
+    return byte_swap32(little_value);
+}
+
 #endif
