@@ -7,18 +7,18 @@
 # Example usage:
 #   make -f Makefile.cross
 
-HEADERS = fs.hpp udp_socket.hpp utils.hpp ../shared/dos.h ../shared/drvproto.h
+HEADERS = fs.hpp udp_socket.hpp slip_udp_serial.hpp serial_port.hpp utils.hpp ../shared/dos.h ../shared/drvproto.h
 
 # posix
 CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
 LDFLAGS = -static -s
-SOURCES = netmount-server.cpp fs.cpp udp_socket.cpp
+SOURCES = netmount-server.cpp fs.cpp udp_socket.cpp slip_udp_serial.cpp serial_port.cpp
 
 # windows
 WIN_CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
 WIN_LDFLAGS = -static -s
 WIN_LIBS = -lws2_32
-WIN_SOURCES = netmount-server.cpp fs.cpp udp_socket_win.cpp
+WIN_SOURCES = netmount-server.cpp fs.cpp udp_socket_win.cpp slip_udp_serial.cpp serial_port_win.cpp
 
 NAME = netmount-server
 

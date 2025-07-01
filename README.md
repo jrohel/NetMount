@@ -10,6 +10,7 @@ It consist of two components:
 
 -----
 ## `netmount` (DOS Client)
+
 - A TSR driver for DOS that allows mounting shared directories from one or more remote machines as local drives.
 - It should work with MS-DOS 5.0 and newer and with sufficiently compatible systems such as FreeDOS.
 - Has minimal dependencies — only a DOS Packet Driver class 1 (Ethernet II) is required.
@@ -66,28 +67,37 @@ Arguments:
 
 -----
 ## `netmount-server` (Directory Sharing Server)
+
 - A cross-platform user-space application that shares directories over the network.
 - Any directory can be shared, including the root (/) directory.
 - The physical location of the directory is irrelevant (hard disk, RAM-based, CD-ROM, network-mounted drive, ...)
-- Uses the UDP protokol
-- Implements file name conversion to DOS 8.3 format.
+- Uses the UDP protocol.
+- Includes built-in implementations of the IP, UDP, and SLIP protocols.
+- Implements file name conversion to the DOS 8.3 format.
 - Supports POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows.
 - Can run as a non-root/unprivileged user.
-- Supports multiple simultaneous instances, each with unique IP/port bindings.
-- CPU architecture independent. Although it is currently developed on x86-64, the application is designed to be portable and should work on other architectures. It supports both little-endian and big-endian systems.
-- Written in C++20. Tested with GCC and Clang.
+- Supports running multiple instances concurrently, each using a unique IP/port combination or
+  a dedicated serial device.
+- CPU architecture independent. Although it is currently developed on x86-64, the application is designed
+  to be portable and should work on other architectures. It supports both little-endian and big-endian systems.
+- Written in C++20. Compilation tested with GCC and Clang.
 
 
 ### Usage:
 ```
-./netmount-server [--help] [--bind_ip_addr=] [--bind_port=udp_port] <drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
+./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
+[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
+<drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
 
 Options:
   --help                      Display this help
-  --bind-addr=<IP_ADDR>       IP address to bind, all address ("0.0.0.0") by default
-  --bind-port=<UDP_PORT>      UDP port to listen, 12200 by default
-  <drive>=<root_path>         drive - DOS drive C-Z, root_path - paths to serve
-  <name_conversion>=<method>  file name conversion method - OFF, RAM (RAM by default)
+  --bind-addr=<IP_ADDR>       IP address to bind to (default: "0.0.0.0" - all addresses). Not supported in SLIP mode
+  --bind-port=<UDP_PORT>      UDP port to listen on (default: 12200)
+  --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)
+  --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device
+  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
+  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
+  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)
 ```
 
 [More info about the server](SERVER.md)

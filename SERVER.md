@@ -3,26 +3,33 @@
 - A cross-platform user-space application that shares directories over the network.
 - Any directory can be shared, including the root (/) directory.
 - The physical location of the directory is irrelevant (hard disk, RAM-based, CD-ROM, network-mounted drive, ...)
-- Uses the UDP protokol
-- Implements file name conversion to DOS 8.3 format.
+- Uses the UDP protocol.
+- Includes built-in implementations of the IP, UDP, and SLIP protocols.
+- Implements file name conversion to the DOS 8.3 format.
 - Supports POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows.
 - Can run as a non-root/unprivileged user.
-- Supports multiple simultaneous instances, each with unique IP/port bindings.
+- Supports running multiple instances concurrently, each using a unique IP/port combination or
+  a dedicated serial device.
 - CPU architecture independent. Although it is currently developed on x86-64, the application is designed
   to be portable and should work on other architectures. It supports both little-endian and big-endian systems.
-- Written in C++20. Tested with GCC and Clang.
+- Written in C++20. Compilation tested with GCC and Clang.
 
 
 ## Usage
 ```
-./netmount-server [--help] [--bind_ip_addr=] [--bind_port=udp_port] <drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
+./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
+[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
+<drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
 
 Options:
   --help                      Display this help
-  --bind-addr=<IP_ADDR>       IP address to bind, all address ("0.0.0.0") by default
-  --bind-port=<UDP_PORT>      UDP port to listen, 12200 by default
-  <drive>=<root_path>         drive - DOS drive C-Z, root_path - paths to serve
-  <name_conversion>=<method>  file name conversion method - OFF, RAM (RAM by default)
+  --bind-addr=<IP_ADDR>       IP address to bind to (default: "0.0.0.0" - all addresses). Not supported in SLIP mode
+  --bind-port=<UDP_PORT>      UDP port to listen on (default: 12200)
+  --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)
+  --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device
+  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
+  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
+  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)
 ```
 
 
@@ -42,6 +49,13 @@ Options:
 - Listens only on IP address `192.168.200.1` using the default port `12200`
 - Filename conversion is enabled only for `D` and disabled for `C` (e.g., "/srv/dos_programs" uses
   a DOS-compatible filesystem with short filenames and is case-insensitive)
+
+**Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
+
+`netmount-server.exe --slip-dev=/dev/ttyUSB1 --slip-speed=115200 D=/srv/data`
+
+- Uses SLIP over the serial port `/dev/ttyUSB1` at a baud rate of `115200` Bd.
+- Listens on all IP addresses and uses the default port `12200`
 
 **Sharing the Current Working Directory as Drive D**
 
@@ -63,6 +77,13 @@ netmount-server D=/home/user/net                          # Share the mounted co
 **Sharing the Current Working Directory**
 
 `netmount-server.exe D=.`
+
+**Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
+
+`netmount-server.exe --slip-dev=COM2 --slip-speed=115200 D=C:\INSTALL`
+
+- Uses SLIP over the serial port `COM2` at a baud rate of `115200` Bd.
+- Listens on all IP addresses and uses the default port `12200`
 
 ## Server file names conversion to DOS 8.3 format
 
@@ -175,11 +196,53 @@ additional security measures, such as a VPN. Unsecured sharing should only be us
 
 
 ## Sharing over a serial port
-The netmount-server uses the UDP protocol, so sharing works over any medium that supports IP and UDP
-transmission. For transmitting the IP protocol over a serial port, the simple SLIP (Serial Line
-Internet Protocol) protocol can be used.
+`netmount-server` uses the UDP protocol, so sharing works over any medium that supports IP and UDP transmission.
+To transmit IP over a serial port, the simple SLIP (Serial Line Internet Protocol) protocol can be used.
+
+**Starting from version 1.3.0, `netmount-server` includes built-in implementations of the IP, UDP, and
+SLIP protocols.** By default, it still uses the operating system’s network stack.
+When the `--slip-dev=<SERIAL_DEVICE>` option is used, it switches to the internal SLIP implementation and
+shares data via the specified `SERIAL_DEVICE`. In this case, the `--slip-speed=<BAUD_RATE>` option is also
+required to set the baud rate of the serial device. Optionally, hardware flow control can be enabled using
+`--slip-rts-cts=1`. The MTU of the built-in implementation is 1500 bytes - meaning the maximum size
+of a transmitted IP packet is 1500 bytes. To use a smaller MTU, configure it on the netmount DOS client side.
+The client will send and request packets accordingly.
+
+The `--bind-addr=<IP_ADDR>` option is not supported in this mode. `netmount-server` responds to all IP
+addresses, and the source IP address in reply matches the destination address of the incoming request.
+UDP port handling works the same as when using the operating system’s network stack - by default,
+netmount-server listens on port 12200, which can be changed using the `--bind-port=<UDP_PORT>` option.
+
+The internal implementation is completely isolated from the system’s network. The only requirement is
+user access to the serial port.
+
+### Examples where using the built-in SLIP implementation is beneficial
+
+- the operating system does not support SLIP,
+
+- the user does not have permission to configure the system network,
+
+- the user wants to keep the SLIP client fully isolated from the system and other networks
+  (preventing possible IP address conflicts between SLIP and other networks),
+
+- the user prefers not to modify the system’s network configuration,
+
+- the user wants to quickly and easily run netmount-server over SLIP.
+
+### Example usage of built-in SLIP implementation
+
+`netmount-server --slip-dev=/dev/ttyUSB0 --slip-speed=115200 C=/shared/`
+
 
 ### SLIP Configuration Example on Linux
+
+**It is still possible to use the SLIP implementation provided by the operating system.**
+This approach is more complex to configure than using the built-in implementation, as it requires modifying
+the system's network settings (see the SLIP configuration example for Linux below).
+However, with this setup, the SLIP-connected device becomes part of the system network and can access
+additional system services. The system may act as a router, allowing the SLIP client to mount shares
+from other computers on the network as well.
+Of course, the available capabilities depend on the operating system used.
 
 1. **Connecting the Serial Port using `slattach`**
 

@@ -4,6 +4,7 @@
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
 #include "fs.hpp"
+#include "slip_udp_serial.hpp"
 #include "udp_socket.hpp"
 #include "utils.hpp"
 
@@ -17,10 +18,11 @@
 #include <array>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 
-#define PROGRAM_VERSION "1.2.0"
+#define PROGRAM_VERSION "1.3.0"
 
 // structs are packed
 #pragma pack(1)
@@ -761,18 +763,23 @@ void print_help(const char * program_name) {
     print(stdout, "Usage:\n");
     print(
         stdout,
-        "{} [--help] [--bind_ip_addr=] [--bind_port=udp_port] <drive>=<root_path>[,name_conversion=<method>] [... "
-        "<drive>=<root_path>[,name_conversion=<method>]]\n\n",
+        "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
+        "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
+        "<drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]\n\n",
         program_name);
 
     print(
         stdout,
         "Options:\n"
         "  --help                      Display this help\n"
-        "  --bind-addr=<IP_ADDR>       IP address to bind, all address (\"0.0.0.0\") by default\n"
-        "  --bind-port=<UDP_PORT>      UDP port to listen, {} by default\n"
-        "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - paths to serve\n"
-        "  <name_conversion>=<method>  file name conversion method - OFF, RAM (RAM by default)\n",
+        "  --bind-addr=<IP_ADDR>       IP address to bind to (default: \"0.0.0.0\" - all addresses). "
+        "Not supported in SLIP mode\n"
+        "  --bind-port=<UDP_PORT>      UDP port to listen on (default: {})\n"
+        "  --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)\n"
+        "  --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device\n"
+        "  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)\n"
+        "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve\n"
+        "  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)\n",
         DRIVE_PROTO_UDP_PORT);
 }
 
@@ -867,6 +874,9 @@ using namespace netmount_srv;
 int main(int argc, char ** argv) {
     std::string bind_addr;
     uint16_t bind_port = DRIVE_PROTO_UDP_PORT;
+    std::string slip_dev;
+    uint32_t slip_speed{0};
+    bool slip_hw_flow_control{false};
     unsigned char cksumflag;
 
     for (int i = 1; i < argc; ++i) {
@@ -893,6 +903,31 @@ int main(int argc, char ** argv) {
             bind_port = port;
             continue;
         }
+        if (arg.starts_with("--slip-dev=")) {
+            slip_dev = arg.substr(11);
+            continue;
+        }
+        if (arg.starts_with("--slip-speed=")) {
+            char * end = nullptr;
+            auto speed = std::strtol(argv[i] + 13, &end, 10);
+            if (speed < 1200 || speed > 230400 || *end != '\0') {
+                print(
+                    stdout,
+                    "Invalid slip port speed \"{}\". Valid values are in the 1200 - 230400 range.\n",
+                    argv[i] + 13);
+                return -1;
+            }
+            slip_speed = speed;
+            continue;
+        }
+        if (arg.starts_with("--slip-rts-cts=")) {
+            slip_hw_flow_control = argv[i][15] == '1';
+            if (!slip_hw_flow_control && argv[i][15] != '0') {
+                print(stdout, "Invalid slip rts/cts flow control \"{}\". Valid values are 1 and 0.\n", argv[i] + 15);
+                return -1;
+            }
+            continue;
+        }
         if (arg[1] == '=') {
             auto ret = parse_share_definition(arg);
             if (ret != 0) {
@@ -902,6 +937,23 @@ int main(int argc, char ** argv) {
         }
         print(stdout, "Unknown argument \"{}\"\n", arg);
         return -1;
+    }
+
+    if (!slip_dev.empty()) {
+        if (slip_speed == 0) {
+            print(
+                stdout,
+                "Slip mode active (\"--slip-dev\" set) but \"--slip-speed\" missing. Use \"--help\" to display "
+                "help.\n");
+            return -1;
+        }
+        if (!bind_addr.empty()) {
+            print(
+                stdout,
+                "\"--bind-addr\" is not supported in slip mode (\"--slip-dev\" is set). Use \"--help\" to display "
+                "help.\n");
+            return -1;
+        }
     }
 
     bool drives_defined = false;
@@ -917,10 +969,27 @@ int main(int argc, char ** argv) {
     }
 
     // Prepare UDP socket
-    UdpSocket sock;
-    sock.bind(bind_addr.c_str(), bind_port);
+    std::unique_ptr<UdpSocket> sock;
+    std::unique_ptr<SlipUdpSerial> slip;
+    if (slip_dev.empty()) {
+        try {
+            sock.reset(new UdpSocket);
+            sock->bind(bind_addr.c_str(), bind_port);
 
-    udp_socket_ptr = &sock;
+            udp_socket_ptr = sock.get();
+        } catch (const std::runtime_error & ex) {
+            err_print("ERROR: UdpSocket initialization failed: {}\n", ex.what());
+            return -1;
+        }
+    } else {
+        try {
+            slip.reset(new SlipUdpSerial(slip_dev));
+            slip->setup(slip_speed, slip_hw_flow_control);
+        } catch (const std::runtime_error & ex) {
+            err_print("ERROR: SlipUdpSerial initialization failed: {}\n", ex.what());
+            return -1;
+        }
+    }
 
     // setup signals handler
     signal(SIGTERM, signal_handler);
@@ -958,33 +1027,60 @@ int main(int argc, char ** argv) {
     try {
         uint8_t request_packet[2048];
         while (exit_flag == 0) {
-            const auto wait_result = sock.wait_for_data(10000);
-            switch (wait_result) {
-                case UdpSocket::WaitResult::TIMEOUT:
-                    dbg_print("wait_for_data(): Timeout\n");
-                    continue;
-                case UdpSocket::WaitResult::SIGNAL:
-                    dbg_print("wait_for_data(): A signal was caught\n");
-                    continue;
-                case UdpSocket::WaitResult::READY:
-                    break;
-            }
+            std::uint16_t request_packet_len;
+            std::uint32_t last_remote_ip;
+            std::uint16_t last_remote_port;
+            std::string last_remote_ip_str;
 
-            auto request_packet_len = sock.receive(request_packet, sizeof(request_packet));
+            if (sock) {
+                const auto wait_result = sock->wait_for_data(10000);
+                switch (wait_result) {
+                    case UdpSocket::WaitResult::TIMEOUT:
+                        dbg_print("sock->wait_for_data(): Timeout\n");
+                        continue;
+                    case UdpSocket::WaitResult::SIGNAL:
+                        dbg_print("sock->wait_for_data(): A signal was caught\n");
+                        continue;
+                    case UdpSocket::WaitResult::READY:
+                        break;
+                }
+
+                request_packet_len = sock->receive(request_packet, sizeof(request_packet));
+
+                last_remote_ip = sock->get_last_remote_ip();
+                last_remote_port = sock->get_last_remote_port();
+                last_remote_ip_str = sock->get_last_remote_ip_str();
+            } else {
+                request_packet_len = slip->receive();
+                if (request_packet_len == 0) {
+                    dbg_print("slip->receive(): Timeout\n");
+                    continue;
+                }
+                if (slip->get_last_dst_port() != bind_port) {
+                    // Not our UDP port. Ignore packet and continue.
+                    dbg_print(
+                        "slip->receive(): Ignoring received UDP packet on port {}, listening on {}\n",
+                        slip->get_last_dst_port(),
+                        bind_port);
+                    continue;
+                }
+                memcpy(request_packet, slip->get_last_rx_data(), request_packet_len);
+
+                last_remote_ip = slip->get_last_remote_ip();
+                last_remote_port = slip->get_last_remote_port();
+                last_remote_ip_str = slip->get_last_remote_ip_str();
+            }
 
             dbg_print("--------------------------------\n");
             {
                 dbg_print(
-                    "Received packet, {} bytes from {}:{}\n",
-                    request_packet_len,
-                    sock.get_last_remote_ip_str(),
-                    sock.get_last_remote_port());
+                    "Received packet, {} bytes from {}:{}\n", request_packet_len, last_remote_ip_str, last_remote_port);
 
                 if (request_packet_len < static_cast<int>(sizeof(struct drive_proto_hdr))) {
                     err_print(
                         "ERROR: received a truncated/malformed packet from {}:{}\n",
-                        sock.get_last_remote_ip_str(),
-                        sock.get_last_remote_port());
+                        last_remote_ip_str,
+                        last_remote_port);
                     continue;
                 }
             }
@@ -995,8 +1091,8 @@ int main(int argc, char ** argv) {
                 err_print(
                     "ERROR: unsupported protocol version {:d} from {}:{}\n",
                     header->version,
-                    sock.get_last_remote_ip_str(),
-                    sock.get_last_remote_port());
+                    last_remote_ip_str,
+                    last_remote_port);
                 continue;
             }
 
@@ -1004,18 +1100,12 @@ int main(int argc, char ** argv) {
 
             const uint16_t length_from_header = from_little16(header->length_flags) & 0x7FF;
             if (length_from_header < sizeof(struct drive_proto_hdr)) {
-                err_print(
-                    "ERROR: received a malformed packet from {}:{}\n",
-                    sock.get_last_remote_ip_str(),
-                    sock.get_last_remote_port());
+                err_print("ERROR: received a malformed packet from {}:{}\n", last_remote_ip_str, last_remote_port);
                 continue;
             }
             if (length_from_header > request_packet_len) {
                 // corupted/truncated packet
-                err_print(
-                    "ERROR: received a truncated packet from {}:{}\n",
-                    sock.get_last_remote_ip_str(),
-                    sock.get_last_remote_port());
+                err_print("ERROR: received a truncated packet from {}:{}\n", last_remote_ip_str, last_remote_port);
                 continue;
             } else {
 #ifdef DEBUG
@@ -1023,8 +1113,8 @@ int main(int argc, char ** argv) {
                     dbg_print(
                         "Received UDP packet with extra data at the end from {}:{} "
                         "(length in header = {}, packet len = {})\n",
-                        sock.get_last_remote_ip_str(),
-                        sock.get_last_remote_port(),
+                        last_remote_ip_str,
+                        last_remote_port,
                         length_from_header,
                         request_packet_len);
                 }
@@ -1069,7 +1159,7 @@ int main(int argc, char ** argv) {
                 }
             }
 
-            auto & reply_info = answer_cache.get_reply_info(sock.get_last_remote_ip(), sock.get_last_remote_port());
+            auto & reply_info = answer_cache.get_reply_info(last_remote_ip, last_remote_port);
             const int send_msg_len = process_request(reply_info, request_packet, request_packet_len);
             // update reply cache entry
             if (send_msg_len >= 0) {
@@ -1106,9 +1196,18 @@ int main(int argc, char ** argv) {
                 dbg_print("Sending back an answer of {} bytes\n", send_msg_len);
                 dump_packet(reply_info.packet.data(), send_msg_len);
 #endif
-                const auto sent_bytes = sock.send_reply(reply_info.packet.data(), send_msg_len);
-                if (sent_bytes != send_msg_len) {
-                    err_print("ERROR: reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
+                std::uint16_t sent_bytes;
+                if (sock) {
+                    sent_bytes = sock->send_reply(reply_info.packet.data(), send_msg_len);
+                    if (sent_bytes != send_msg_len) {
+                        err_print("ERROR: reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
+                    }
+                } else {
+                    try {
+                        slip->send_reply(reply_info.packet.data(), send_msg_len);
+                    } catch (const std::runtime_error & ex) {
+                        err_print("ERROR: send_reply: {}", ex.what());
+                    }
                 }
             } else {
                 err_print("ERROR: Request ignored: Returned {}\n", send_msg_len);
