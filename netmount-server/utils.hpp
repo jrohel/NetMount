@@ -15,22 +15,27 @@
 //#define SIMULATE_PACKET_LOSS
 
 // The C++23 language provides `std::print`.
-// We define a `print` macro with a similar function for C++20.
-#define print(stream, fmt, ...)                                                  \
-    {                                                                            \
-        std::fputs(std::format(fmt __VA_OPT__(, ) __VA_ARGS__).c_str(), stream); \
-    }
+// This is implementation for C++20.
+template <typename... Args>
+void print(std::FILE * stream, std::format_string<Args...> fmt, Args &&... args) {
+    std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
+    std::fputs(formatted_string.c_str(), stream);
+}
 
-#define err_print(fmt, ...)                                                      \
-    {                                                                            \
-        std::fputs(std::format(fmt __VA_OPT__(, ) __VA_ARGS__).c_str(), stderr); \
-    }
+
+template <typename... Args>
+void err_print(std::format_string<Args...> fmt, Args &&... args) {
+    std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
+    std::fputs(formatted_string.c_str(), stderr);
+}
+
 
 #ifdef DEBUG
-#define dbg_print(fmt, ...)                                                      \
-    {                                                                            \
-        std::fputs(std::format(fmt __VA_OPT__(, ) __VA_ARGS__).c_str(), stderr); \
-    }
+template <typename... Args>
+void dbg_print(std::format_string<Args...> fmt, Args &&... args) {
+    std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
+    std::fputs(formatted_string.c_str(), stderr);
+}
 #else
 #define dbg_print(fmt, ...)
 #endif
