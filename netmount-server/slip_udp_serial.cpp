@@ -3,6 +3,7 @@
 
 #include "slip_udp_serial.hpp"
 
+#include "logger.hpp"
 #include "utils.hpp"
 
 #include <cstring>
@@ -173,7 +174,10 @@ void SlipUdpSerial::send(
     build_headers(headers, last_sent_packet_id, src_ip, dst_ip, src_port, dst_port, length);
     const auto tx_buffer_length = encode_slip(tx_buffer, headers, data, length);
     const auto written = serial.write_bytes(tx_buffer.data(), tx_buffer_length);
-    dbg_print("SlipUdpSerial::send() \n");
+    log(LogLevel::DEBUG,
+        "SlipUdpSerial::send() request to write {} bytes, written {} bytes\n",
+        tx_buffer_length,
+        written);
     if (written != static_cast<int>(tx_buffer_length)) {
         throw std::runtime_error("SlipUdpSerial::send: Sent a different number of bytes than requested");
     }
@@ -217,7 +221,9 @@ uint16_t SlipUdpSerial::recv_decode_slip() {
     uint8_t rcv_byte;
     while (serial.read_byte(rcv_byte) == 1) {
         if (rcv_byte == SLIP_END) {
-            dbg_print("SlipUdpSerial::recv_decode_slip: recv_decode_slip: Receive SLIP_END: len = {}\n", len);
+            log(LogLevel::DEBUG,
+                "SlipUdpSerial::recv_decode_slip: recv_decode_slip: Receive SLIP_END: len = {}\n",
+                len);
             if (started && len > 0) {
                 break;
             } else {
@@ -227,13 +233,15 @@ uint16_t SlipUdpSerial::recv_decode_slip() {
         }
 
         if (!started) {
-            dbg_print("SlipUdpSerial::recv_decode_slip: Received character ignored, waiting for SLIP_END character\n");
+            log(LogLevel::DEBUG,
+                "SlipUdpSerial::recv_decode_slip: Received character ignored, waiting for SLIP_END character\n");
             continue;
         }
 
         if (len + 1U == rx_buffer.size()) {
-            err_print(
-                "SlipUdpSerial::recv_decode_slip: Received data length bigger than buffer size (MTU = {})\n", MTU);
+            log(LogLevel::ERROR,
+                "SlipUdpSerial::recv_decode_slip: Received data length bigger than buffer size (MTU = {})\n",
+                MTU);
             return 0;
         }
 
@@ -258,34 +266,37 @@ uint16_t SlipUdpSerial::recv_decode_slip() {
 
 std::uint16_t SlipUdpSerial::parse_udp_packet(std::uint16_t rx_packet_len) {
     if (rx_packet_len < sizeof(net_headers)) {
-        dbg_print("SlipUdpSerial::parse_udp_packet: Short datagram received\n");
+        log(LogLevel::INFO, "SlipUdpSerial::parse_udp_packet: Short datagram received\n");
         return 0;
     }
 
     auto * headers = reinterpret_cast<const net_headers *>(rx_buffer.data());
 
     if ((headers->ipv4.version_ihl & 0xF0) != (4 << 4)) {
-        dbg_print("SlipUdpSerial::parse_udp_packet: Received datagram is not a IPv4 packet\n");
+        log(LogLevel::NOTICE, "SlipUdpSerial::parse_udp_packet: Received datagram is not a IPv4 packet\n");
         return 0;
     }
     if ((headers->ipv4.version_ihl & 0x0F) != (sizeof(ipv4_hdr) / 4)) {
-        dbg_print("SlipUdpSerial::parse_udp_packet: Received datagram has unsupported IPv4 header length\n");
+        log(LogLevel::WARNING,
+            "SlipUdpSerial::parse_udp_packet: Received datagram has unsupported IPv4 header length\n");
         return 0;
     }
 
     // The IP header checksum is mandatory. It must always be sent.
     if (internet_checksum(&headers->ipv4, sizeof(ipv4_hdr)) != 0) {
-        err_print("SlipUdpSerial::parse_udp_packet: Received datagram has an invalid IPv4 header checksum\n");
+        log(LogLevel::WARNING,
+            "SlipUdpSerial::parse_udp_packet: Received datagram has an invalid IPv4 header checksum\n");
         return 0;
     }
 
     if (headers->ipv4.protocol != IPV4_PROTOCOL_UDP) {
-        dbg_print("SlipUdpSerial::parse_udp_packet: Received datagram is not a UDP packet\n");
+        log(LogLevel::DEBUG, "SlipUdpSerial::parse_udp_packet: Received datagram is not a UDP packet\n");
         return 0;
     }
 
     if (rx_packet_len < from_big16(headers->ipv4.total_len)) {
-        err_print("SlipUdpSerial::parse_udp_packet: Corrupted datagram received, length shorter than ipv4.total_len\n");
+        log(LogLevel::WARNING,
+            "SlipUdpSerial::parse_udp_packet: Corrupted datagram received, length shorter than ipv4.total_len\n");
         return 0;
     }
 
@@ -298,12 +309,12 @@ std::uint16_t SlipUdpSerial::parse_udp_packet(std::uint16_t rx_packet_len) {
     // headers->udp.checksum is ignored
 
     if (udp_len < sizeof(udp_hdr)) {
-        err_print("SlipUdpSerial::parse_udp_packet: Corrupted datagram received, short udp.length\n");
+        log(LogLevel::WARNING, "SlipUdpSerial::parse_udp_packet: Corrupted datagram received, short udp.length\n");
         return 0;
     }
 
     if (rx_packet_len < sizeof(ipv4_hdr) + udp_len) {
-        err_print(
+        log(LogLevel::WARNING,
             "SlipUdpSerial::parse_udp_packet: Corrupted datagram received, length shorter than udp.length plus IPv4 "
             "header length\n");
         return 0;

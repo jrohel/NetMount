@@ -3,6 +3,7 @@
 
 #include "fs.hpp"
 
+#include "logger.hpp"
 #include "utils.hpp"
 
 #include <errno.h>
@@ -162,7 +163,10 @@ uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
 
         if (cur_item.path == server_path) {
             cur_item.last_used_time = now;
-            dbg_print("Found handle {} with path \"{}\" in cache\n", handle, server_path.string());
+            log(LogLevel::DEBUG,
+                "get_handle: Found handle {} with path \"{}\" in cache\n",
+                handle,
+                server_path.string());
             return handle;
         }
 
@@ -170,8 +174,10 @@ uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
             if (!cur_item.directory_list.empty()) {
                 // Directory list is too old -> remove it from cache and free memory.
                 // It will be re-generated if necessary.
-                dbg_print(
-                    "Remove old directory list for handle {} path \"{}\" from cache\n", handle, server_path.string());
+                log(LogLevel::DEBUG,
+                    "get_handle: Remove old directory list for handle {} path \"{}\" from cache\n",
+                    handle,
+                    server_path.string());
                 cur_item.directory_list = {};
             }
         }
@@ -261,7 +267,7 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
 
     // len 0 means "truncate" or "extend"
     if (len == 0) {
-        dbg_print("truncate \"{}\" to {} bytes\n", fname.string(), offset);
+        log(LogLevel::DEBUG, "write_file: truncate \"{}\" to {} bytes\n", fname.string(), offset);
         if (truncate(fname.string().c_str(), offset) != 0) {
             throw std::runtime_error(std::format("Cannot truncate file: {}", strerror(errno)));
         }
@@ -269,7 +275,7 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
     }
 
     //  write to file
-    dbg_print("write {} bytes into file \"{}\" at offset {}\n", len, fname.string(), offset);
+    log(LogLevel::DEBUG, "write_file: write {} bytes into file \"{}\" at offset {}\n", len, fname.string(), offset);
     fd = fopen(fname.string().c_str(), "r+b");
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
@@ -308,7 +314,7 @@ bool Drive::find_file(
     std::error_code ec;
     const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), get_root(), ec);
     if (ec) {
-        dbg_print("find_file: {}\n", ec.message());
+        log(LogLevel::DEBUG, "find_file: {}\n", ec.message());
         return false;
     }
 
@@ -316,20 +322,20 @@ bool Drive::find_file(
     if ((nth == 0) || (item.directory_list.empty())) {
         const auto count = item.create_directory_list(*this);
         if (count < 0) {
-            err_print("ERROR: Failed to scan dir \"{}\"\n", item.path.string());
+            log(LogLevel::WARNING, "Failed to scan dir \"{}\"\n", item.path.string());
             return false;
-#ifdef DEBUG
         } else {
-            dbg_print("Scanned dir \"{}\", found {} items\n", item.path.string(), count);
-            for (const auto & item : item.directory_list) {
-                dbg_print(
-                    "  \"{:.8s}{:.3s}\", attr 0x{:02X}, {} bytes\n",
-                    reinterpret_cast<const char *>(&item.fcb_name.name_blank_padded),
-                    reinterpret_cast<const char *>(&item.fcb_name.ext_blank_padded),
-                    item.attrs,
-                    item.size);
+            log(LogLevel::DEBUG, "Scanned dir \"{}\", found {} items\n", item.path.string(), count);
+            if (global_log_level >= LogLevel::TRACE) {
+                for (const auto & item : item.directory_list) {
+                    log(LogLevel::TRACE,
+                        "  \"{:.8s}{:.3s}\", attr 0x{:02X}, {} bytes\n",
+                        reinterpret_cast<const char *>(&item.fcb_name.name_blank_padded),
+                        reinterpret_cast<const char *>(&item.fcb_name.ext_blank_padded),
+                        item.attrs,
+                        item.size);
+                }
             }
-#endif
         }
     }
 
@@ -467,8 +473,7 @@ void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t at
 }
 
 
-uint8_t Drive::get_dos_properties(
-    const std::filesystem::path & client_path, DosFileProperties * properties) {
+uint8_t Drive::get_dos_properties(const std::filesystem::path & client_path, DosFileProperties * properties) {
     auto [server_path, exist] = create_server_path(client_path);
     return get_server_path_dos_properties(server_path, properties);
 }
@@ -480,8 +485,7 @@ uint8_t Drive::get_server_path_dos_properties(
 }
 
 
-void Drive::rename_file(
-    const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
+void Drive::rename_file(const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
     const auto [old_server_path, exist1] = create_server_path(old_client_path);
     const auto [new_server_path, exist2] = create_server_path(new_client_path);
     netmount_srv::rename_file(old_server_path, new_server_path);
@@ -535,7 +539,7 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             if (match_fcb_name_to_mask(filfcb, short_name_to_fcb(path_str))) {
                 std::error_code ec;
                 if (!std::filesystem::remove(dentry.path(), ec)) {
-                    err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
+                    log(LogLevel::ERROR, "delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
                 }
             }
         }
@@ -557,7 +561,7 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             try {
                 netmount_srv::delete_file(path);
             } catch (const std::runtime_error & ex) {
-                err_print("ERROR: delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
+                log(LogLevel::ERROR, "delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
             }
         }
     }
@@ -592,7 +596,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                 if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
                     fprops.server_name = name;
                 }
-                dbg_print(
+                log(LogLevel::DEBUG,
                     "create_directory_list: {} -> {:.8s} {:.3s}\n",
                     name,
                     (char *)fprops.fcb_name.name_blank_padded,
@@ -601,7 +605,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
             }
         } else if (directory_list.size() == 0xFFFFU) {
             // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
-            err_print(
+            log(LogLevel::ERROR,
                 "FilesystemDB::Item::create_directory_list: Directory \"{}\" contains more than 65535 items",
                 path.string());
             break;
@@ -615,7 +619,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
             file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
             fprops.server_name = filename;
         }
-        dbg_print(
+        log(LogLevel::DEBUG,
             "create_directory_list: {} -> {:.8s} {:.3s}\n",
             filename.string(),
             (char *)fprops.fcb_name.name_blank_padded,
@@ -814,7 +818,7 @@ uint8_t get_path_dos_properties(
     }
     uint32_t attr;
     if (ioctl(fd, FAT_IOCTL_GET_ATTRIBUTES, &attr) < 0) {
-        err_print("Failed to fetch attributes of \"{}\"\n", path.string());
+        log(LogLevel::ERROR, "get_path_dos_properties: Failed to fetch attributes of \"{}\"\n", path.string());
         close(fd);
         return 0;
     } else {
@@ -884,7 +888,11 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
         try {
             set_item_attrs(path, attrs);
         } catch (const std::runtime_error & ex) {
-            err_print("Error: Failed to set attribute 0x{:02X} to \"{}\": {}\n", attrs, path.string(), ex.what());
+            log(LogLevel::ERROR,
+                "create_or_truncate_file: Failed to set attribute 0x{:02X} to \"{}\": {}\n",
+                attrs,
+                path.string(),
+                ex.what());
         }
     }
 

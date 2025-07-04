@@ -19,6 +19,7 @@
 ```
 ./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
+[--log-level=<LEVEL>]
 <drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]
 
 Options:
@@ -28,6 +29,7 @@ Options:
   --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)
   --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device
   --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
+  --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)
   <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
   <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)
 ```
