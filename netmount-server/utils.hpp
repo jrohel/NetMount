@@ -9,8 +9,6 @@
 #include <cstdio>
 #include <format>
 
-//#define DEBUG
-
 // Enables packet loss simulation (for tests)
 //#define SIMULATE_PACKET_LOSS
 
@@ -21,24 +19,6 @@ void print(std::FILE * stream, std::format_string<Args...> fmt, Args &&... args)
     std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
     std::fputs(formatted_string.c_str(), stream);
 }
-
-
-template <typename... Args>
-void err_print(std::format_string<Args...> fmt, Args &&... args) {
-    std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
-    std::fputs(formatted_string.c_str(), stderr);
-}
-
-
-#ifdef DEBUG
-template <typename... Args>
-void dbg_print(std::format_string<Args...> fmt, Args &&... args) {
-    std::string formatted_string = std::vformat(fmt.get(), std::make_format_args(args...));
-    std::fputs(formatted_string.c_str(), stderr);
-}
-#else
-#define dbg_print(fmt, ...)
-#endif
 
 
 inline char ascii_to_upper(char c) {
