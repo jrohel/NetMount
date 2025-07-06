@@ -587,45 +587,50 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
     directory_list.clear();
     fcb_names.clear();
 
-    for (const auto & dentry : std::filesystem::directory_iterator(path)) {
-        if (directory_list.empty()) {
-            for (const auto name : {".", ".."}) {
-                const auto fullpath = path / name;
-                DosFileProperties fprops;
-                get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
-                fprops.fcb_name = short_name_to_fcb(name);
-                if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
-                    fprops.server_name = name;
+    try {
+        for (const auto & dentry : std::filesystem::directory_iterator(path)) {
+            if (directory_list.empty()) {
+                for (const auto name : {".", ".."}) {
+                    const auto fullpath = path / name;
+                    DosFileProperties fprops;
+                    get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
+                    fprops.fcb_name = short_name_to_fcb(name);
+                    if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
+                        fprops.server_name = name;
+                    }
+                    log(LogLevel::DEBUG,
+                        "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                        name,
+                        (char *)fprops.fcb_name.name_blank_padded,
+                        (char *)fprops.fcb_name.ext_blank_padded);
+                    directory_list.emplace_back(fprops);
                 }
-                log(LogLevel::DEBUG,
-                    "create_directory_list: {} -> {:.8s} {:.3s}\n",
-                    name,
-                    (char *)fprops.fcb_name.name_blank_padded,
-                    (char *)fprops.fcb_name.ext_blank_padded);
-                directory_list.emplace_back(fprops);
+            } else if (directory_list.size() == 0xFFFFU) {
+                // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
+                log(LogLevel::ERROR,
+                    "FilesystemDB::Item::create_directory_list: Directory \"{}\" contains more than 65535 items",
+                    path.string());
+                break;
             }
-        } else if (directory_list.size() == 0xFFFFU) {
-            // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
-            log(LogLevel::ERROR,
-                "FilesystemDB::Item::create_directory_list: Directory \"{}\" contains more than 65535 items",
-                path.string());
-            break;
-        }
 
-        DosFileProperties fprops;
-        auto path = dentry.path();
-        auto filename = path.filename();
-        get_path_dos_properties(path, &fprops, drive.is_on_fat());
-        if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
-            file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
-            fprops.server_name = filename;
+            DosFileProperties fprops;
+            auto path = dentry.path();
+            auto filename = path.filename();
+            get_path_dos_properties(path, &fprops, drive.is_on_fat());
+            if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
+                file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
+                fprops.server_name = filename;
+            }
+            log(LogLevel::DEBUG,
+                "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                filename.string(),
+                (char *)fprops.fcb_name.name_blank_padded,
+                (char *)fprops.fcb_name.ext_blank_padded);
+            directory_list.emplace_back(fprops);
         }
-        log(LogLevel::DEBUG,
-            "create_directory_list: {} -> {:.8s} {:.3s}\n",
-            filename.string(),
-            (char *)fprops.fcb_name.name_blank_padded,
-            (char *)fprops.fcb_name.ext_blank_padded);
-        directory_list.emplace_back(fprops);
+    } catch (const std::runtime_error & ex) {
+        log(LogLevel::WARNING, "create_directory_list: {}\n", ex.what());
+        return -1;
     }
 
     update_last_used_timestamp();
