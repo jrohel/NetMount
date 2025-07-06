@@ -887,10 +887,16 @@ int parse_share_definition(std::string_view share) {
 
     std::size_t offset = 2;
     auto root_path = get_token(share, ',', offset);
+    std::filesystem::path rpath;
     try {
-        drive.set_root(std::filesystem::canonical(root_path));
+        rpath = std::filesystem::canonical(root_path);
+        if (!std::filesystem::is_directory(rpath)) {
+            log(LogLevel::CRITICAL, "Path \"{}\" is not a directory\n", root_path);
+            return 1;
+        }
+        drive.set_root(rpath);
     } catch (const std::exception & ex) {
-        print(stderr, "ERROR: failed to resolve path \"{}\": {}\n", root_path, ex.what());
+        log(LogLevel::CRITICAL, "Failed to resolve path \"{}\": {}\n", root_path, ex.what());
         return 1;
     }
 
