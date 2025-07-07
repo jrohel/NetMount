@@ -1,3 +1,69 @@
+# 1.4.0
+
+## Features
+
+- **Replace `err_print` and `dbg_print` with a level-based logger**
+
+    Previously, there were only two logging levels: `dbg_print` and `err_print`.
+    Additionally, `dbg_print` had to be enabled at compile time.
+
+    Now, both are replaced with a single `log()` function that supports seven
+    logging levels: `CRITICAL`, `ERROR`, `WARNING`, `NOTICE`, `INFO`, `DEBUG`, and `TRACE`.
+    Users can configure the desired logging verbosity at application startup.
+
+    Log messages are written to standard error (stderr) and are automatically prefixed
+    with ISO 8601 timestamps with millisecond precision.
+
+    A new program argument has been added
+
+    `--log-level=<LEVEL>`  Logging verbosity level: `0 = OFF`, `7 = TRACE` (default: `3`)
+
+- **Add support for setting volume label for shared drives**
+
+    Previously, shared drives had no volume label. Now, the user can specify
+    a label for each shared drive. If a volume label is not specified,
+    the default label "NETMOUNT" is used. To share a drive without a volume
+    label, an empty string can be passed: `--label=`.
+
+    A new program option has been added:
+
+    `<label>=<volume_label>`  volume label (first 11 chars used,
+                              default: NETMOUNT; use "--label=" to remove)
+
+## Fixes
+
+- **Don't exit on error in Drive::Item::create_directory_list**
+
+    If an error occurs during directory listing (e.g. when a request is made
+    to list a directory using a file-type argument), the error is now only
+    logged and does not cause the server to exit.
+
+- **Implement basic INT2F_UNLOCK_FILE handler**
+
+    Previously, only the INT2F_LOCK_UNLOCK_FILE function (a client request)
+    was handled. INT2F_UNLOCK_FILE is now supported as well, but both
+    handlers currently only validate the file handle and log an ERROR if
+    the handle is invalid. Actual locking/unlocking is not yet implemented
+    and may be added later.
+
+## Other
+
+- **dump_packet to stderr instead of stdout**
+
+- **server: create_server_path: Add path to exception message**
+
+- **Check if the shared path is a directory**
+
+    Previously, this check was not performed, so the user could specify
+    a file (socket, device, ...) instead of a directory as the shared path.
+
+- **create_directory_list: Add "." and ".." entries only to non-root directories**
+
+    Previously, "." and ".." entries were added to the list for all directories,
+    and the `find_file` function skipped these entries for root directories.
+
+----
+
 # 1.3.0
 
 ## Features

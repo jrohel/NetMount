@@ -23,7 +23,7 @@
 #include <string>
 #include <string_view>
 
-#define PROGRAM_VERSION "1.3.0"
+#define PROGRAM_VERSION "1.4.0"
 
 // structs are packed
 #pragma pack(1)
@@ -831,7 +831,7 @@ uint16_t bsd_checksum(const void * addr, uint16_t len) {
 void print_help(const char * program_name) {
     print(
         stdout,
-        "NetMount server {} , Copyright 2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
+        "NetMount server {}, Copyright 2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
         "NetMount server comes with ABSOLUTELY NO WARRANTY. This is free software\n"
         "and you are welcome to redistribute it under the terms of the GNU GPL v2.\n\n",
         PROGRAM_VERSION);
