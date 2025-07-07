@@ -310,7 +310,24 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             try {
                 drive.get_handle_path(handle);
             } catch (const std::runtime_error & ex) {
-                log(LogLevel::WARNING, "LOCK_UNLOCK_FILE handle {}: {}\n", handle, ex.what());
+                log(LogLevel::ERROR, "LOCK_UNLOCK_FILE handle {}: {}\n", handle, ex.what());
+                // TODO: Send error to client?
+            }
+        } break;
+
+        case INT2F_UNLOCK_FILE: {
+            if (request_data_len < sizeof(drive_proto_lockf)) {
+                return -1;
+            }
+            // Only checking the existence of the handle
+            // TODO: Implement unlock after lock.
+            auto * const request = reinterpret_cast<const drive_proto_lockf *>(request_data);
+            const uint16_t handle = from_little16(request->start_cluster);
+            log(LogLevel::DEBUG, "UNLOCK_FILE handle {}\n", handle);
+            try {
+                drive.get_handle_path(handle);
+            } catch (const std::runtime_error & ex) {
+                log(LogLevel::ERROR, "UNLOCK_FILE handle {}: {}\n", handle, ex.what());
                 // TODO: Send error to client?
             }
         } break;
