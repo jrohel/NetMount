@@ -764,33 +764,33 @@ void dump_packet(const unsigned char * frame, int len) {
         for (int b = 0; b < LINEWIDTH; ++b) {
             const int offset = line_offset + b;
             if (b == LINEWIDTH / 2)
-                print(stdout, " ");
+                print(stderr, " ");
             if (offset < len) {
-                print(stdout, " {:02X}", frame[offset]);
+                print(stderr, " {:02X}", frame[offset]);
             } else {
-                print(stdout, "   ");
+                print(stderr, "   ");
             }
         }
 
-        print(stdout, " | ");  // delimiter between hex and ascii
+        print(stderr, " | ");  // delimiter between hex and ascii
 
         // output ascii data
         for (int b = 0; b < LINEWIDTH; ++b) {
             const int offset = line_offset + b;
             if (b == LINEWIDTH / 2)
-                print(stdout, " ");
+                print(stderr, " ");
             if (offset >= len) {
-                print(stdout, " ");
+                print(stderr, " ");
                 continue;
             }
             if ((frame[offset] >= ' ') && (frame[offset] <= '~')) {
-                print(stdout, "{:c}", frame[offset]);
+                print(stderr, "{:c}", frame[offset]);
             } else {
-                print(stdout, ".");
+                print(stderr, ".");
             }
         }
 
-        print(stdout, "\n");
+        print(stderr, "\n");
     }
 }
 
