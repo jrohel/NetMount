@@ -32,6 +32,9 @@ namespace netmount_srv {
 
 namespace {
 
+constexpr char DEFAULT_VOLUME_LABEL[] = "NETMOUNT";
+
+
 // Reply cache - contains the last replies sent to clients
 // It is used in case a client has not received reply and resends request so that we don't process
 // the request again (which can be dangerous in case of write requests).
@@ -839,7 +842,8 @@ void print_help(const char * program_name) {
         "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
         "[--log-level=<LEVEL>] "
-        "<drive>=<root_path>[,name_conversion=<method>] [... <drive>=<root_path>[,name_conversion=<method>]]\n\n",
+        "<drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>] "
+        "[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]\n\n",
         program_name);
 
     print(
@@ -854,8 +858,10 @@ void print_help(const char * program_name) {
         "  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)\n"
         "  --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)\n"
         "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve\n"
+        "  <label>=<volume_label>      volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
         "  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)\n",
-        DRIVE_PROTO_UDP_PORT);
+        DRIVE_PROTO_UDP_PORT,
+        DEFAULT_VOLUME_LABEL);
 }
 
 
@@ -917,8 +923,19 @@ int parse_share_definition(std::string_view share) {
         return 1;
     }
 
+    bool is_volume_label_defined = false;
+
     while (++offset < share.length()) {
         const auto option = get_token(share, '=', offset);
+        if (option == "label") {
+            const auto value = get_token(share, ',', ++offset);
+            if (!value.empty()) {
+                log(LogLevel::INFO, "Set volume label to \"{}\" for drive {:c}\n", value, drive_char);
+                drive.set_volume_label(value);
+            }
+            is_volume_label_defined = true;
+            continue;
+        }
         if (option == "name_conversion") {
             const auto value = get_token(share, ',', ++offset);
             auto upper_value = string_ascii_to_upper(value);
@@ -940,6 +957,11 @@ int parse_share_definition(std::string_view share) {
         }
         print(stdout, "Unknown argument \"{}\"\n", option);
         return -1;
+    }
+
+    if (!is_volume_label_defined) {
+        log(LogLevel::INFO, "Using default volume label \"{}\" for drive {:c}\n", DEFAULT_VOLUME_LABEL, drive_char);
+        drive.set_volume_label(DEFAULT_VOLUME_LABEL);
     }
 
     return 0;

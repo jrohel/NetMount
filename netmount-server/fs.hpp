@@ -76,6 +76,8 @@ public:
     // Sets `root` for this drive. Initialize `used` and `on_fat`.
     void set_root(std::filesystem::path root);
 
+    void set_volume_label(const std::string & label);
+
     void set_file_name_conversion(FileNameConversion conversion) { name_conversion = conversion; }
     FileNameConversion get_file_name_conversion() const { return name_conversion; }
 
@@ -163,6 +165,8 @@ private:
 
     bool used{false};
     std::filesystem::path root;
+    fcb_file_name volume_label;
+    bool has_volume_label{false};
     bool on_fat;
     FileNameConversion name_conversion{FileNameConversion::RAM};
 

@@ -152,6 +152,41 @@ void Drive::set_root(std::filesystem::path root) {
 }
 
 
+void Drive::set_volume_label(const std::string & label) {
+    if (label.empty()) {
+        has_volume_label = false;
+        log(LogLevel::DEBUG, "set_volume_label: Remove label\n");
+        return;
+    }
+
+    // clear previos value
+    for (auto & ch : volume_label.name_blank_padded) {
+        ch = ' ';
+    }
+    for (auto & ch : volume_label.ext_blank_padded) {
+        ch = ' ';
+    }
+
+    // copy/convert to FCB file name style
+    unsigned int i = 0;
+    auto it = label.begin();
+    while (it != label.end() && i < sizeof(volume_label.name_blank_padded)) {
+        volume_label.name_blank_padded[i++] = *it++;
+    }
+    i = 0;
+    while (it != label.end() && i < sizeof(volume_label.ext_blank_padded)) {
+        volume_label.ext_blank_padded[i++] = *it++;
+    }
+
+    has_volume_label = true;
+
+    log(LogLevel::DEBUG,
+        "set_volume_label: Set label \"{:.8s}{:.3s}\"\n",
+        reinterpret_cast<const char *>(volume_label.name_blank_padded),
+        reinterpret_cast<const char *>(volume_label.ext_blank_padded));
+}
+
+
 uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
     uint16_t first_free = items.size();
     uint16_t oldest = 0;
@@ -349,7 +384,7 @@ bool Drive::find_file(
             }
         } else {
             // return only file with at most the specified combination of hidden, system, and directory attributes
-            if ((attr | (item_props.attrs & (FAT_HIDDEN | FAT_SYSTEM | FAT_DIRECTORY))) != attr)
+            if ((attr | (item_props.attrs & (FAT_HIDDEN | FAT_SYSTEM | FAT_VOLUME | FAT_DIRECTORY))) != attr)
                 continue;
         }
 
@@ -375,7 +410,7 @@ const std::filesystem::path & Drive::get_server_name(
         item.create_directory_list(*this);
     }
     for (auto & dir : item.directory_list) {
-        if (dir.fcb_name == fcb_name) {
+        if (dir.attrs != FAT_VOLUME && dir.fcb_name == fcb_name) {
             return dir.server_name;
         }
     }
@@ -586,7 +621,22 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                     log(LogLevel::ERROR, "create_directory_list: {}\n", ec.message());
                     return -1;
                 }
-                if (!is_root_dir) {
+                if (is_root_dir) {
+                    if (drive.has_volume_label) {
+                        DosFileProperties fprops;
+                        fprops.fcb_name = drive.volume_label;
+                        fprops.attrs = FAT_VOLUME;
+                        fprops.size = 0;
+                        fprops.time_date = 0;
+                        log(LogLevel::DEBUG,
+                            "create_directory_list: VOLUME LABEL {:.8s}{:.3s} -> {:.8s} {:.3s}\n",
+                            reinterpret_cast<const char *>(drive.volume_label.name_blank_padded),
+                            reinterpret_cast<const char *>(drive.volume_label.ext_blank_padded),
+                            reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
+                            reinterpret_cast<const char *>(fprops.fcb_name.ext_blank_padded));
+                        directory_list.emplace_back(fprops);
+                    }
+                } else {
                     // Add the . and .. entries to non-root directories
                     for (const auto name : {".", ".."}) {
                         const auto fullpath = path / name;
