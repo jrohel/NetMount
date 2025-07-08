@@ -311,13 +311,6 @@ bool Drive::find_file(
 
     auto & item = get_item(handle);
 
-    std::error_code ec;
-    const bool is_root_dir = std::filesystem::equivalent(get_handle_path(handle), get_root(), ec);
-    if (ec) {
-        log(LogLevel::DEBUG, "find_file: {}\n", ec.message());
-        return false;
-    }
-
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
     if ((nth == 0) || (item.directory_list.empty())) {
         const auto count = item.create_directory_list(*this);
@@ -346,9 +339,6 @@ bool Drive::find_file(
     for (n = nth; n < item_count; ++n) {
         const auto & item_props = dir_list[n];
 
-        // skip '.' and '..' items if directory is root
-        if (is_root_dir && item_props.fcb_name.name_blank_padded[0] == '.')
-            continue;
         if (!match_fcb_name_to_mask(tmpl, item_props.fcb_name))
             continue;
 
@@ -590,20 +580,29 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
     try {
         for (const auto & dentry : std::filesystem::directory_iterator(path)) {
             if (directory_list.empty()) {
-                for (const auto name : {".", ".."}) {
-                    const auto fullpath = path / name;
-                    DosFileProperties fprops;
-                    get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
-                    fprops.fcb_name = short_name_to_fcb(name);
-                    if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
-                        fprops.server_name = name;
+                std::error_code ec;
+                const bool is_root_dir = std::filesystem::equivalent(path, drive.get_root(), ec);
+                if (ec) {
+                    log(LogLevel::ERROR, "create_directory_list: {}\n", ec.message());
+                    return -1;
+                }
+                if (!is_root_dir) {
+                    // Add the . and .. entries to non-root directories
+                    for (const auto name : {".", ".."}) {
+                        const auto fullpath = path / name;
+                        DosFileProperties fprops;
+                        get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
+                        fprops.fcb_name = short_name_to_fcb(name);
+                        if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
+                            fprops.server_name = name;
+                        }
+                        log(LogLevel::DEBUG,
+                            "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                            name,
+                            (char *)fprops.fcb_name.name_blank_padded,
+                            (char *)fprops.fcb_name.ext_blank_padded);
+                        directory_list.emplace_back(fprops);
                     }
-                    log(LogLevel::DEBUG,
-                        "create_directory_list: {} -> {:.8s} {:.3s}\n",
-                        name,
-                        (char *)fprops.fcb_name.name_blank_padded,
-                        (char *)fprops.fcb_name.ext_blank_padded);
-                    directory_list.emplace_back(fprops);
                 }
             } else if (directory_list.size() == 0xFFFFU) {
                 // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
