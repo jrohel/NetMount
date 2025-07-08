@@ -1207,7 +1207,7 @@ int main(int argc, char ** argv) {
 #ifdef SIMULATE_PACKET_LOSS
             // simulated random input packet LOSS
             if ((rand() & 31) == 0) {
-                print(stderr, "Incoming packet lost!\n");
+                log(LogLevel::ERROR, "Simulate incoming packet loss!\n");
                 continue;
             }
 #endif
@@ -1220,14 +1220,19 @@ int main(int argc, char ** argv) {
                                           reinterpret_cast<const uint8_t *>(header)));
                 const uint16_t cksum_remote = from_little16(header->checksum);
                 if (cksum_mine != cksum_remote) {
-                    print(
-                        stderr, "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n", cksum_mine, cksum_remote);
+                    log(LogLevel::ERROR,
+                        "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n",
+                        cksum_mine,
+                        cksum_remote);
                     continue;
                 }
             } else {
                 const uint16_t recv_magic = from_little16(header->checksum);
                 if (recv_magic != DRIVE_PROTO_MAGIC) {
-                    print(stderr, "Bad MAGIC! Expected: 0x{:04X} Received: 0x{:04X}\n", DRIVE_PROTO_MAGIC, recv_magic);
+                    log(LogLevel::ERROR,
+                        "Bad MAGIC! Expected: 0x{:04X} Received: 0x{:04X}\n",
+                        DRIVE_PROTO_MAGIC,
+                        recv_magic);
                     continue;
                 }
             }
@@ -1245,7 +1250,7 @@ int main(int argc, char ** argv) {
 #ifdef SIMULATE_PACKET_LOSS
             // simulated random ouput packet LOSS
             if ((rand() & 31) == 0) {
-                print(stderr, "Outgoing packet lost!\n");
+                log(LogLevel::ERROR, "Simulate outgoing packet loss!\n");
                 continue;
             }
 #endif
