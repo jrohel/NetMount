@@ -599,8 +599,8 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                         log(LogLevel::DEBUG,
                             "create_directory_list: {} -> {:.8s} {:.3s}\n",
                             name,
-                            (char *)fprops.fcb_name.name_blank_padded,
-                            (char *)fprops.fcb_name.ext_blank_padded);
+                            reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
+                            reinterpret_cast<const char *>(fprops.fcb_name.ext_blank_padded));
                         directory_list.emplace_back(fprops);
                     }
                 }
@@ -623,8 +623,8 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
             log(LogLevel::DEBUG,
                 "create_directory_list: {} -> {:.8s} {:.3s}\n",
                 filename.string(),
-                (char *)fprops.fcb_name.name_blank_padded,
-                (char *)fprops.fcb_name.ext_blank_padded);
+                reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
+                reinterpret_cast<const char *>(fprops.fcb_name.ext_blank_padded));
             directory_list.emplace_back(fprops);
         }
     } catch (const std::runtime_error & ex) {

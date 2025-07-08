@@ -69,7 +69,7 @@ uint16_t internet_checksum(const void * addr, uint16_t len) {
 
     //  Add left-over byte, if any
     if (len > 0) {
-        sum += *(uint8_t *)ptr;
+        sum += *reinterpret_cast<const uint8_t *>(ptr);
     }
 
     //  Fold 32-bit sum to 16 bits
