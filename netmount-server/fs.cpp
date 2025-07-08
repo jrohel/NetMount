@@ -419,7 +419,8 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
                 server_path /= *prev_it;
                 return {server_path, false};
             }
-            throw std::runtime_error("Error: create_server_path: Parent path not found");
+            throw std::runtime_error(
+                std::format("create_server_path: Parent path not found: {}", (server_path / *prev_it).string()));
         }
         server_path /= server_name;
         if (it == it_end) {
