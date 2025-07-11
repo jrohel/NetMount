@@ -6,14 +6,14 @@
 It consist of two components:
 
 - **`netmount`**: A lightweight TSR (Terminate and Stay Resident) driver for DOS that allows access to remote directories as standard network drives.
-- **`netmount-server`**: A cross-platform server application for POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows, designed to share directories with DOS clients over the network.
+- **`netmount-server`**: A cross-platform server application for POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows, designed to share directories with DOS clients over a network or serial port using built-in SLIP protocol support.
 
 -----
 ## `netmount` (DOS Client)
 
 - A TSR driver for DOS that allows mounting shared directories from one or more remote machines as local drives.
 - It should work with MS-DOS 5.0 and newer and with sufficiently compatible systems such as FreeDOS.
-- Has minimal dependencies — only a DOS Packet Driver class 1 (Ethernet II) is required.
+- Has minimal dependencies - only a DOS Packet Driver class 1 (Ethernet II) is required.
 - Implements Ethernet Type II frame, ARP, IPv4, UDP and its own NetMount protocol.
 - Supports any network interface for which a DOS Packet Driver class 1 (Ethernet II) is available. This includes Ethernet adapters, as well as serial, parallel, and other interfaces supported through appropriate drivers.
 - Does not require a system reboot when mounting additional or unmounting drives.

@@ -56,7 +56,7 @@ Options:
 
 **Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
 
-`netmount-server.exe --slip-dev=/dev/ttyUSB1 --slip-speed=115200 D=/srv/data`
+`netmount-server --slip-dev=/dev/ttyUSB1 --slip-speed=115200 D=/srv/data`
 
 - Uses SLIP over the serial port `/dev/ttyUSB1` at a baud rate of `115200` Bd.
 - Listens on all IP addresses and uses the default port `12200`
@@ -190,7 +190,7 @@ various filename restrictions must be taken into account, as NetMount supports D
 When sharing private data over an untrusted network (e.g., the Internet), it is strongly recommended to use
 additional security measures, such as a VPN. Unsecured sharing should only be used for public, read-only data.
 
-- The protocol does not protect data against eavesdropping — the data is not encrypted.
+- The protocol does not protect data against eavesdropping - the data is not encrypted.
 
 - It does not provide client authentication; anyone can mount the disk.
 

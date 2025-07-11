@@ -128,7 +128,7 @@
     per drive.**
 
     Additionally, it's now possible to share the same directory multiple
-    times with different settings — in particular, with different
+    times with different settings - in particular, with different
     `name_conversion` configurations.
 
 ## Other
