@@ -858,8 +858,8 @@ void print_help(const char * program_name) {
         "  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)\n"
         "  --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)\n"
         "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve\n"
-        "  <label>=<volume_label>      volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
-        "  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)\n",
+        "  label=<volume_label>        volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
+        "  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)\n",
         DRIVE_PROTO_UDP_PORT,
         DEFAULT_VOLUME_LABEL);
 }

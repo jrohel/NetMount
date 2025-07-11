@@ -100,8 +100,8 @@ Options:
   --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
   --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)
   <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
-  <label>=<volume_label>      volume label (first 11 chars used, default: NETMOUNT; use "--label=" to remove)
-  <name_conversion>=<method>  file name conversion method: OFF, RAM (default: RAM)
+  label=<volume_label>        volume label (first 11 chars used, default: NETMOUNT; use "--label=" to remove)
+  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)
 ```
 
 [More info about the server](SERVER.md)
