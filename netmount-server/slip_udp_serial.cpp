@@ -238,7 +238,7 @@ uint16_t SlipUdpSerial::recv_decode_slip() {
             continue;
         }
 
-        if (len + 1U == rx_buffer.size()) {
+        if (len == rx_buffer.size()) {
             log(LogLevel::ERROR,
                 "SlipUdpSerial::recv_decode_slip: Received data length bigger than buffer size (MTU = {})\n",
                 MTU);
