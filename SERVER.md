@@ -208,9 +208,9 @@ SLIP protocols.** By default, it still uses the operating system’s network sta
 When the `--slip-dev=<SERIAL_DEVICE>` option is used, it switches to the internal SLIP implementation and
 shares data via the specified `SERIAL_DEVICE`. In this case, the `--slip-speed=<BAUD_RATE>` option is also
 required to set the baud rate of the serial device. Optionally, hardware flow control can be enabled using
-`--slip-rts-cts=1`. The MTU of the built-in implementation is 1500 bytes - meaning the maximum size
-of a transmitted IP packet is 1500 bytes. To use a smaller MTU, configure it on the netmount DOS client side.
-The client will send and request packets accordingly.
+`--slip-rts-cts=1`. The MTU of the built-in implementation is 1500 bytes, meaning the maximum size of a received
+or transmitted IP packet is 1500 bytes. To use a smaller MTU, configure it on the NetMount DOS client side -
+the client will send and request packets accordingly.
 
 The `--bind-addr=<IP_ADDR>` option is not supported in this mode. `netmount-server` responds to all IP
 addresses, and the source IP address in reply matches the destination address of the incoming request.

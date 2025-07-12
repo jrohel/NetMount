@@ -156,23 +156,26 @@ To transmit IP over a serial port, the simple SLIP (Serial Line Internet Protoco
 
 2. **Install the NetMount client**
 
-    `netmount install /IP:192.168.100.10 /MTU:576 /NO_ARP_REQUESTS`
+    `netmount install /IP:192.168.100.10 /NO_ARP_REQUESTS`
 
     - **/IP:192.168.100.10**: Local (client) IP address
-    - **/MTU:576**: Reduce MTU to 576 bytes
     - **/NO_ARP_REQUESTS**: Don't send ARP requests. SLIP operates at the IP layer and does not use MAC addresses.
 
 3. **Mount shares**
 
     `netmount mount 192.168.100.2/C G`
 
-The example uses an MTU of 576 bytes. On slow links, a small MTU is often used to prevent a single packet
-transfer from blocking the line for too long. A common value is 576 bytes, which is the minimum MTU size
-for the IPv4 protocol as defined in RFC 791. A smaller MTU means data must be split into more, smaller
-fragments, increasing protocol overhead and reducing transmission speed.
+The example uses the default MTU of 1500 bytes. On slow links, a smaller MTU is often chosen to prevent a single
+packet transfer from occupying the line for too long. A commonly used value is 576 bytes (`/MTU:576`), which
+is the minimum MTU defined for the IPv4 protocol in RFC 791. However, using a smaller MTU means that data
+must be split into more, smaller fragments, which increases protocol overhead and reduces transmission efficiency.
 
-In our case, if only NetMount is communicating over the serial link, it's more efficient to use larger frames.
-The only limitation is the maximum packet size supported by the Packet Driver and the remote server.
+The `ethersl.com` packet driver and the built-in SLIP implementation in the NetMount server support an MTU of 1500
+bytes. The Linux SLIP driver supports an MTU of up to 65,534 bytes.
+
+In our case, if only NetMount is communicating over the serial link, using the default MTU of 1500 bytes is
+the most efficient option. However, if any part of the network path to the server has a lower MTU, the MTU setting
+on the NetMount client must be adjusted accordingly.
 
 
 ## Memory Usage
