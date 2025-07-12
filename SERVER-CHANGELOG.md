@@ -1,3 +1,20 @@
+# 1.4.1 (2025-07-12)
+
+## Fixes
+
+- **Fix --help message - remove <> from label and name_conversion**
+
+- **Fix SLIP receive data length check**
+
+    Fixed an off-by-one error in the SLIP frame decoding logic.
+    The server incorrectly reported a buffer overflow when receiving data
+    exactly equal to the buffer size (1500 bytes), effectively limiting
+    the maximum receive size to 1499 bytes (MTU 1499).
+    Sending was unaffected and allowed full 1500-byte frames.
+    This issue has now been resolved.
+
+----
+
 # 1.4.0 (2025-07-08)
 
 ## Features
