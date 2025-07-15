@@ -344,6 +344,32 @@ int32_t Drive::get_file_size(uint16_t handle) {
 bool Drive::find_file(
     uint16_t handle, const fcb_file_name & tmpl, unsigned char attr, DosFileProperties & properties, uint16_t & nth) {
 
+    if (nth == 0 && attr == FAT_VOLUME) {
+        // Handle volume label directly; no need to process directory list.
+
+        if (!has_volume_label) {
+            log(LogLevel::DEBUG, "find_file: Drive has no volume label\n");
+            return false;
+        }
+        if (!match_fcb_name_to_mask(tmpl, volume_label)) {
+            log(LogLevel::DEBUG, "find_file: Drive volume label does not match mask\n");
+            return false;
+        }
+
+        properties.fcb_name = volume_label;
+        properties.attrs = FAT_VOLUME;
+        properties.size = 0;
+        properties.time_date = 0;
+
+        log(LogLevel::DEBUG,
+            "find_file: Found volume label: {:.8s}{:.3s}\n",
+            reinterpret_cast<const char *>(volume_label.name_blank_padded),
+            reinterpret_cast<const char *>(volume_label.ext_blank_padded));
+
+        nth = 1;
+        return true;
+    }
+
     auto & item = get_item(handle);
 
     // recompute the dir listing if operation is FIND_FIRST (nth == 0) or if no cache found
