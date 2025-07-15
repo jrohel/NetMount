@@ -15,7 +15,7 @@ LogLevel global_log_level = LogLevel::WARNING;
 namespace detail {
 
 void log(LogLevel level, const std::string & message) {
-    auto now = std::chrono::utc_clock::now();
+    auto now = std::chrono::system_clock::now();
     auto formatted_message = std::format(
         "{:%FT%TZ} {} {}",
         std::chrono::time_point_cast<std::chrono::milliseconds>(now),
