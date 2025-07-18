@@ -13,36 +13,89 @@
 #include <atomic>
 #include <stdexcept>
 
-// Microsoft example says: Need to link with Ws2_32.lib
-#pragma comment(lib, "Ws2_32.lib")
+class DynamicLibrary {
+public:
+    DynamicLibrary() = default;
+
+    ~DynamicLibrary() { unload(); }
+
+    DynamicLibrary(const DynamicLibrary &) = delete;
+    DynamicLibrary & operator=(const DynamicLibrary &) = delete;
+
+    DynamicLibrary(DynamicLibrary && other) noexcept {
+        handle = other.handle;
+        other.handle = nullptr;
+    }
+
+    DynamicLibrary & operator=(DynamicLibrary && other) noexcept {
+        if (this != &other) {
+            unload();
+            handle = other.handle;
+            other.handle = nullptr;
+        }
+        return *this;
+    }
+
+    bool load(const char * library_name) noexcept {
+        unload();  // Unload any existing library
+        handle = LoadLibraryA(library_name);
+        return handle;
+    }
+
+    void unload() noexcept {
+        if (handle) {
+            FreeLibrary(handle);
+            handle = nullptr;
+        }
+    }
+
+    FARPROC get_function(const char * function_name) const noexcept {
+        if (!handle) {
+            return nullptr;
+        }
+
+        return GetProcAddress(handle, function_name);
+    }
+
+    template <typename T>
+    T get_function(const char * function_name) const noexcept {
+        union {
+            FARPROC raw;
+            T typed;
+        } caster;
+
+        caster.raw = get_function(function_name);
+        return caster.typed;
+    }
+
+private:
+    HMODULE handle{nullptr};
+};
+
 
 class UdpSocket::Impl {
 public:
     Impl() {
-        WORD version_requested = MAKEWORD(2, 2);
-        WSADATA wsa_data;
-        if (auto err = WSAStartup(version_requested, &wsa_data); err != NO_ERROR) {
-            throw_error("UdpSocket: WSAStartup()", err);
-        }
+        init_library();
 
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sock = p_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sock == INVALID_SOCKET) {
-            auto err = WSAGetLastError();
-            WSACleanup();
+            auto err = p_WSAGetLastError();
+            library_cleanup();
             throw_error("UdpSocket: socket()", err);
         }
     }
 
     ~Impl() {
         signal_stop();
-        WSACleanup();
+        library_cleanup();
     }
 
     void bind(const char * local_ip, uint16_t local_port) {
         auto addr = INADDR_ANY;
         if (local_ip && local_ip[0] != '\0') {
-            if (inet_pton(AF_INET, local_ip, &addr) <= 0) {
-                throw_error("UdpSocket::bind: inet_pton()", WSAGetLastError());
+            if (p_inet_pton(AF_INET, local_ip, &addr) <= 0) {
+                throw_error("UdpSocket::bind: inet_pton()", p_WSAGetLastError());
             }
         }
 
@@ -51,8 +104,8 @@ public:
         bind_addr.sin_addr.s_addr = addr;
         bind_addr.sin_port = to_big16(local_port);
 
-        if (::bind(sock, reinterpret_cast<const sockaddr *>(&bind_addr), sizeof(bind_addr)) == SOCKET_ERROR) {
-            throw_error("UdpSocket::bind: bind()", WSAGetLastError());
+        if (p_bind(sock, reinterpret_cast<const sockaddr *>(&bind_addr), sizeof(bind_addr)) == SOCKET_ERROR) {
+            throw_error("UdpSocket::bind: bind()", p_WSAGetLastError());
         }
     }
 
@@ -65,9 +118,9 @@ public:
         FD_ZERO(&read_set);
         FD_SET(sock, &read_set);
 
-        const auto select_ret = select(0, &read_set, NULL, NULL, &timeout);
+        const auto select_ret = p_select(0, &read_set, NULL, NULL, &timeout);
         if (select_ret == SOCKET_ERROR) {
-            throw_error("UdpSocket::wait_for_data: select()", WSAGetLastError());
+            throw_error("UdpSocket::wait_for_data: select()", p_WSAGetLastError());
         }
 
         if (signaled.test()) {
@@ -83,7 +136,7 @@ public:
 
     uint16_t receive(void * buffer, size_t bufferSize) {
         socklen_t addr_len = sizeof(last_remote_addr);
-        const auto bytes_received = recvfrom(
+        const auto bytes_received = p_recvfrom(
             sock,
             reinterpret_cast<char *>(buffer),
             static_cast<int>(bufferSize),
@@ -95,14 +148,14 @@ public:
             if (signaled.test()) {
                 throw_error("UdpSocket::receive: recvfrom(): Stop signal caught");
             }
-            throw_error("UdpSocket::receieve: recvfrom()", WSAGetLastError());
+            throw_error("UdpSocket::receieve: recvfrom()", p_WSAGetLastError());
         }
 
         return bytes_received;
     }
 
     uint16_t send_reply(const void * data, size_t dataSize) {
-        const auto sent_bytes = sendto(
+        const auto sent_bytes = p_sendto(
             sock,
             reinterpret_cast<const char *>(data),
             static_cast<int>(dataSize),
@@ -114,7 +167,7 @@ public:
             if (signaled.test()) {
                 throw_error("UdpSocket::send_reply: sendto(): Stop signal caught");
             }
-            throw_error("UdpSocket::send_reply: sendto()", WSAGetLastError());
+            throw_error("UdpSocket::send_reply: sendto()", p_WSAGetLastError());
         }
 
         return sent_bytes;
@@ -124,8 +177,8 @@ public:
 
     const std::string & get_last_remote_ip_str() const {
         char ipStr[INET_ADDRSTRLEN];
-        if (!inet_ntop(AF_INET, &last_remote_addr.sin_addr, ipStr, sizeof(ipStr))) {
-            throw_error("UdpSocket::get_last_remote_ip_str: inet_ntop()", WSAGetLastError());
+        if (!p_inet_ntop(AF_INET, &last_remote_addr.sin_addr, ipStr, sizeof(ipStr))) {
+            throw_error("UdpSocket::get_last_remote_ip_str: inet_ntop()", p_WSAGetLastError());
         }
         last_remote_ip = ipStr;
         return last_remote_ip;
@@ -137,17 +190,39 @@ public:
         if (signaled.test_and_set()) {
             return;
         }
-        closesocket(sock);
+        p_closesocket(sock);
         sock = INVALID_SOCKET;
     }
 
 private:
+    DynamicLibrary ws2_lib;
+    bool loaded{false};
+
+    INT(WSAAPI * p_WSAStartup)(WORD wVersionRequested, LPWSADATA lpWSAData) = nullptr;
+    INT(WSAAPI * p_WSACleanup)(VOID) = nullptr;
+    INT(WSAAPI * p_WSAGetLastError)(VOID) = nullptr;
+
+    SOCKET(WSAAPI * p_socket)(INT af, INT type, INT protocol) = nullptr;
+    INT(WSAAPI * p_closesocket)(SOCKET s) = nullptr;
+
+    INT(WSAAPI * p_bind)(SOCKET s, const struct sockaddr * name, INT namelen) = nullptr;
+
+    INT(WSAAPI * p_recvfrom)(SOCKET s, CHAR * buf, INT len, INT flags, struct sockaddr * from, INT * fromlen) = nullptr;
+    INT(WSAAPI * p_sendto)(SOCKET s, const CHAR * buf, INT len, INT flags, const struct sockaddr * to, INT tolen) =
+        nullptr;
+
+    INT(WSAAPI * p_select)(
+        INT nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, const struct timeval * timeout) = nullptr;
+
+    PCSTR(WSAAPI * p_inet_ntop)(INT Family, const VOID * pAddr, PSTR pStringBuf, size_t StringBufSize) = nullptr;
+    INT(WSAAPI * p_inet_pton)(INT Family, PCSTR pszAddrString, PVOID pAddrBuf) = nullptr;
+
     SOCKET sock;
     sockaddr_in last_remote_addr{};
     mutable std::string last_remote_ip{};
     std::atomic_flag signaled{};
 
-    static std::string get_WSA_error_message(int error_code) {
+    static std::string get_error_message(int error_code) {
         char * msg_buffer = nullptr;
         FormatMessageA(
             FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -163,10 +238,75 @@ private:
     }
 
     [[noreturn]] static void throw_error(const std::string & context, int error_code) {
-        throw std::runtime_error(context + ": " + get_WSA_error_message(error_code));
+        throw std::runtime_error(context + ": " + get_error_message(error_code));
     }
 
     [[noreturn]] static void throw_error(const std::string & message) { throw std::runtime_error(message); }
+
+    void init_library() {
+        if (loaded) {
+            return;
+        }
+
+        if (!ws2_lib.load("ws2_32.dll")) {
+            throw_error("UdpSocket::init_library: load(\"ws2_32.dll\")", GetLastError());
+        }
+
+        if (!(p_WSAStartup = ws2_lib.get_function<decltype(p_WSAStartup)>("WSAStartup"))) {
+            throw_error("UdpSocket::init_library: get_function(\"WSAStartup\")", GetLastError());
+        }
+        if (!(p_WSACleanup = ws2_lib.get_function<decltype(p_WSACleanup)>("WSACleanup"))) {
+            throw_error("UdpSocket::init_library: get_function(\"WSACleanup\")", GetLastError());
+        }
+        if (!(p_WSAGetLastError = ws2_lib.get_function<decltype(p_WSAGetLastError)>("WSAGetLastError"))) {
+            throw_error("UdpSocket::init_library: get_function(\"WSAGetLastError\")", GetLastError());
+        }
+
+        if (!(p_socket = ws2_lib.get_function<decltype(p_socket)>("socket"))) {
+            throw_error("UdpSocket::init_library: get_function(\"socket\")", GetLastError());
+        }
+        if (!(p_closesocket = ws2_lib.get_function<decltype(p_closesocket)>("closesocket"))) {
+            throw_error("UdpSocket::init_library: get_function(\"closesocket\")", GetLastError());
+        }
+
+        if (!(p_bind = ws2_lib.get_function<decltype(p_bind)>("bind"))) {
+            throw_error("UdpSocket::init_library: get_function(\"bind\")", GetLastError());
+        }
+
+        if (!(p_recvfrom = ws2_lib.get_function<decltype(p_recvfrom)>("recvfrom"))) {
+            throw_error("UdpSocket::init_library: get_function(\"recvfrom\")", GetLastError());
+        }
+        if (!(p_sendto = ws2_lib.get_function<decltype(p_sendto)>("sendto"))) {
+            throw_error("UdpSocket::init_library: get_function(\"sendto\")", GetLastError());
+        }
+
+        if (!(p_select = ws2_lib.get_function<decltype(p_select)>("select"))) {
+            throw_error("UdpSocket::init_library: get_function(\"select\")", GetLastError());
+        }
+
+        if (!(p_inet_ntop = ws2_lib.get_function<decltype(p_inet_ntop)>("inet_ntop"))) {
+            throw_error("UdpSocket::init_library: get_function(\"inet_ntop\")", GetLastError());
+        }
+        if (!(p_inet_pton = ws2_lib.get_function<decltype(p_inet_pton)>("inet_pton"))) {
+            throw_error("UdpSocket::init_library: get_function(\"inet_pton\")", GetLastError());
+        }
+
+        WORD version_requested = MAKEWORD(2, 2);
+        WSADATA wsa_data;
+        if (auto err = p_WSAStartup(version_requested, &wsa_data); err != NO_ERROR) {
+            throw_error("UdpSocket: WSAStartup()", err);
+        }
+
+        loaded = true;
+    }
+
+    void library_cleanup() noexcept {
+        if (loaded) {
+            p_WSACleanup();
+        }
+        ws2_lib.unload();
+        loaded = false;
+    }
 };
 
 
