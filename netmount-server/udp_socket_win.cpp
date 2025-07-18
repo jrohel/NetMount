@@ -2,6 +2,7 @@
 // Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "udp_socket.hpp"
+#include "utils.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 
@@ -48,7 +49,7 @@ public:
         sockaddr_in bind_addr{};
         bind_addr.sin_family = AF_INET;
         bind_addr.sin_addr.s_addr = addr;
-        bind_addr.sin_port = htons(local_port);
+        bind_addr.sin_port = to_big16(local_port);
 
         if (::bind(sock, reinterpret_cast<const sockaddr *>(&bind_addr), sizeof(bind_addr)) == SOCKET_ERROR) {
             throw_error("UdpSocket::bind: bind()", WSAGetLastError());
@@ -119,7 +120,7 @@ public:
         return sent_bytes;
     }
 
-    uint32_t get_last_remote_ip() const { return ntohl(last_remote_addr.sin_addr.s_addr); }
+    uint32_t get_last_remote_ip() const { return from_big32(last_remote_addr.sin_addr.s_addr); }
 
     const std::string & get_last_remote_ip_str() const {
         char ipStr[INET_ADDRSTRLEN];
@@ -130,7 +131,7 @@ public:
         return last_remote_ip;
     }
 
-    uint16_t get_last_remote_port() const { return ntohs(last_remote_addr.sin_port); }
+    uint16_t get_last_remote_port() const { return from_big16(last_remote_addr.sin_port); }
 
     void signal_stop() {
         if (signaled.test_and_set()) {
