@@ -94,9 +94,7 @@ public:
     void bind(const char * local_ip, uint16_t local_port) {
         auto addr = INADDR_ANY;
         if (local_ip && local_ip[0] != '\0') {
-            if (p_inet_pton(AF_INET, local_ip, &addr) <= 0) {
-                throw_error("UdpSocket::bind: inet_pton()", p_WSAGetLastError());
-            }
+            ip_from_string(AF_INET, local_ip, &addr);
         }
 
         sockaddr_in bind_addr{};
@@ -177,9 +175,7 @@ public:
 
     const std::string & get_last_remote_ip_str() const {
         char ipStr[INET_ADDRSTRLEN];
-        if (!p_inet_ntop(AF_INET, &last_remote_addr.sin_addr, ipStr, sizeof(ipStr))) {
-            throw_error("UdpSocket::get_last_remote_ip_str: inet_ntop()", p_WSAGetLastError());
-        }
+        ip_to_string(AF_INET, &last_remote_addr.sin_addr, ipStr, sizeof(ipStr));
         last_remote_ip = ipStr;
         return last_remote_ip;
     }
@@ -216,6 +212,9 @@ private:
 
     PCSTR(WSAAPI * p_inet_ntop)(INT Family, const VOID * pAddr, PSTR pStringBuf, size_t StringBufSize) = nullptr;
     INT(WSAAPI * p_inet_pton)(INT Family, PCSTR pszAddrString, PVOID pAddrBuf) = nullptr;
+
+    unsigned long(WSAAPI * p_inet_addr)(const char * cp) = nullptr;
+    char *(WSAAPI * p_inet_ntoa)(in_addr in) = nullptr;
 
     SOCKET sock;
     sockaddr_in last_remote_addr{};
@@ -285,10 +284,16 @@ private:
         }
 
         if (!(p_inet_ntop = ws2_lib.get_function<decltype(p_inet_ntop)>("inet_ntop"))) {
-            throw_error("UdpSocket::init_library: get_function(\"inet_ntop\")", GetLastError());
+            // `inet_ntop` not found; falling back to `inet_ntoa`
+            if (!(p_inet_ntoa = ws2_lib.get_function<decltype(p_inet_ntoa)>("inet_ntoa"))) {
+                throw_error("UdpSocket::init_library: get_function(\"inet_ntoa\")", GetLastError());
+            }
         }
         if (!(p_inet_pton = ws2_lib.get_function<decltype(p_inet_pton)>("inet_pton"))) {
-            throw_error("UdpSocket::init_library: get_function(\"inet_pton\")", GetLastError());
+            // `inet_pton` not found; falling back to `inet_addr`
+            if (!(p_inet_addr = ws2_lib.get_function<decltype(p_inet_addr)>("inet_addr"))) {
+                throw_error("UdpSocket::init_library: get_function(\"inet_addr\")", GetLastError());
+            }
         }
 
         WORD version_requested = MAKEWORD(2, 2);
@@ -306,6 +311,60 @@ private:
         }
         ws2_lib.unload();
         loaded = false;
+    }
+
+    // Converts an IPv4 or IPv6 address from its standard text representation to its numeric binary form.
+    // Uses `inet_pton`, with a fallback to `inet_addr` for IPv4 on legacy Windows.
+    void ip_from_string(int af, const char * src, void * dst) const {
+        if (p_inet_pton) {
+            auto ret = p_inet_pton(af, src, dst);
+            if (ret == 1) {
+                return;
+            }
+            if (ret == 0) {
+                throw_error("UdpSocket::ip_from_string: inet_pton(): Not valid address string");
+            } else {
+                throw_error("UdpSocket::ip_from_string: inet_pton()", p_WSAGetLastError());
+            }
+        }
+
+        if (af == AF_INET) {
+            // Falling back to the legacy function; only IPv4 is supported.
+            struct in_addr addr;
+            addr.s_addr = p_inet_addr(src);
+            if (addr.s_addr != INADDR_NONE || strcmp(src, "255.255.255.255") == 0) {
+                *reinterpret_cast<struct in_addr *>(dst) = addr;
+                return;
+            }
+            throw_error("UdpSocket::ip_from_string: inet_addr(): failed");
+        }
+
+        throw_error("UdpSocket::ip_from_string: Unsupported function");
+    }
+
+    // Converts an IPv4 or IPv6 network address to a string in standard text format.
+    // Uses `inet_ntop`, with a fallback to `inet_ntoa` for IPv4 on legacy Windows.
+    void ip_to_string(int af, const void * src, char * dst, socklen_t size) const {
+        if (p_inet_ntop) {
+            if (p_inet_ntop(af, src, dst, size)) {
+                return;
+            }
+            throw_error("UdpSocket::ip_to_string: inet_ntop()", p_WSAGetLastError());
+        }
+
+        if (af == AF_INET) {
+            // Falling back to the legacy function; only IPv4 is supported.
+            auto addr = *reinterpret_cast<const struct in_addr *>(src);
+            const char * ip_string = p_inet_ntoa(addr);
+            if (ip_string && dst) {
+                strncpy(dst, ip_string, size);
+                dst[size - 1] = '\0';
+                return;
+            }
+            throw_error("UdpSocket::ip_to_string: inet_ntoa(): failed");
+        }
+
+        throw_error("UdpSocket::ip_to_string: Unsupported function");
     }
 };
 
