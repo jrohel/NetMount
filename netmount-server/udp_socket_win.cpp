@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
+#include "logger.hpp"
 #include "udp_socket.hpp"
 #include "utils.hpp"
 
@@ -284,13 +285,19 @@ private:
         }
 
         if (!(p_inet_ntop = ws2_lib.get_function<decltype(p_inet_ntop)>("inet_ntop"))) {
-            // `inet_ntop` not found; falling back to `inet_ntoa`
+            log(LogLevel::NOTICE,
+                "UdpSocket::init_library: get_function(\"inet_ntop\"): {}\n",
+                get_error_message(GetLastError()));
+            log(LogLevel::NOTICE, "UdpSocket::init_library: falling back to \"inet_ntoa\"\n");
             if (!(p_inet_ntoa = ws2_lib.get_function<decltype(p_inet_ntoa)>("inet_ntoa"))) {
                 throw_error("UdpSocket::init_library: get_function(\"inet_ntoa\")", GetLastError());
             }
         }
         if (!(p_inet_pton = ws2_lib.get_function<decltype(p_inet_pton)>("inet_pton"))) {
-            // `inet_pton` not found; falling back to `inet_addr`
+            log(LogLevel::NOTICE,
+                "UdpSocket::init_library: get_function(\"inet_pton\"): {}\n",
+                get_error_message(GetLastError()));
+            log(LogLevel::NOTICE, "UdpSocket::init_library: falling back to \"inet_addr\"\n");
             if (!(p_inet_addr = ws2_lib.get_function<decltype(p_inet_addr)>("inet_addr"))) {
                 throw_error("UdpSocket::init_library: get_function(\"inet_addr\")", GetLastError());
             }
