@@ -23,7 +23,7 @@
 #include <string>
 #include <string_view>
 
-#define PROGRAM_VERSION "1.4.1"
+#define PROGRAM_VERSION "1.4.2"
 
 // structs are packed
 #pragma pack(1)

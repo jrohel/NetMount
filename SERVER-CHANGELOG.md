@@ -1,3 +1,66 @@
+# 1.4.2 (2025-07-20)
+
+## Optimizations
+
+- **Optimize volume label handling by skipping directory list**
+
+    Volume label requests are now handled directly, without generating
+    the directory list.
+
+## Compatibility with older systems
+
+- **Use `chrono::system_clock` instead of `chrono::utc_clock` in log**
+
+    `std::chrono::system_clock` is sufficient for logging purposes.
+    The resulting binary is smaller, and the `system_clock` is supported
+    by older standard libraries, which improves compatibility. For example,
+    the standard library in FreeBSD 14.2 does not support
+    `std::chrono::utc_clock`.
+
+- **udp_socket_win: Use our to_big/from_big instead of hton/ntoh**
+
+    Replaced calls to `htons`, `ntohs`, and `ntohl` with our own `to_big16`,
+    `from_big16`, and `from_big32` functions. These are already used elsewhere
+    in the codebase, so we no longer need to rely on the Windows versions.
+
+- **udp_socket_win: Dynamic load "ws2_32.dll" at runtime when needed**
+
+    The "ws2_32.dll" dependency is now loaded dynamically at runtime, and only
+    if networking functionality is actually required. Previously, the library
+    was linked at build time, which meant network functions were always needed,
+    even when unused - such as when using serial port sharing.
+
+    When serial port sharing is used, the server relies on a built-in,
+    OS-independent network implementation. Therefore, there's no need to
+    depend on Windows networking libraries at all.
+
+    This change allows the server to run and share data over a serial port
+    even on Windows systems without networking support (e.g., stripped-down
+    configurations). Previously, Windows Vista or later was required due to
+    link-time dependencies on `inet_pton` and `inet_ntop`.
+
+- **udp_socket_win: inet_pton/ntop fallback for pre-Vista Windows**
+
+    On Windows, `inet_pton` and `inet_ntop` are only supported starting with
+    Windows Vista. To maintain compatibility with older versions, custom
+    helper functions `ip_from_string` and `ip_to_string` were introduced.
+
+    These helpers use `inet_pton`/`inet_ntop` when available, and fall back
+    to the legacy `inet_addr` and `inet_ntoa` functions otherwise. This
+    ensures IPv4 support across a wider range of Windows versions.
+    The legacy functions have been available since the early days of IPv4
+    support in Windows - at least since Windows 95 and Windows NT 3.1.
+
+## Other
+
+- **udp_socket_win: Log NOTICE if falling back to inet_ntoa/addr**
+
+    Logs a NOTICE if `inet_pton` and `inet_ntop` are unavailable (likely
+    on pre-Vista Windows), and the server falls back to using `inet_addr`
+    and `inet_ntoa`.
+
+----
+
 # 1.4.1 (2025-07-12)
 
 ## Fixes
