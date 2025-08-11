@@ -42,11 +42,13 @@ constexpr int REPLY_CACHE_SIZE = 16;
 class ReplyCache {
 public:
     struct ReplyInfo {
-        std::array<uint8_t, 1500> packet;  // entire packet that was sent
-        uint16_t len{0};                   // packet length
-        uint32_t ipv4_addr;                // remote IP address
-        uint16_t udp_port;                 // remote UDP port
-        time_t timestamp;                  // time of answer (so if cache full I can drop oldest)
+        std::array<uint8_t, 1500> recv_packet;  // entire packet that was received
+        std::array<uint8_t, 1500> send_packet;  // entire packet that was sent
+        uint16_t recv_len{0};                   // packet length
+        uint16_t send_len{0};                   // packet length
+        uint32_t ipv4_addr;                     // remote IP address
+        uint16_t udp_port;                      // remote UDP port
+        time_t timestamp;                       // time of answer (so if cache full I can drop oldest)
 
         ReplyInfo() = default;
 
@@ -77,7 +79,8 @@ ReplyCache::ReplyInfo & ReplyCache::get_reply_info(uint32_t ipv4_addr, uint16_t 
     }
 
     // matching item not found, reuse oldest item
-    oldest_item->len = 0;  // invalidate old content by setting length to 0
+    oldest_item->recv_len = 0;  // invalidate old content by setting length to 0
+    oldest_item->send_len = 0;  // invalidate old content by setting length to 0
     oldest_item->ipv4_addr = ipv4_addr;
     oldest_item->udp_port = udp_port;
     return *oldest_item;
@@ -141,13 +144,23 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         return -1;
     }
 
-    auto const * const request_header = reinterpret_cast<struct drive_proto_hdr const *>(request_packet);
-    auto * const reply_header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.packet.data());
+    auto * const request_header = reinterpret_cast<struct drive_proto_hdr const *>(request_packet);
+    auto * const cache_recv_header = reinterpret_cast<struct drive_proto_hdr const *>(reply_info.recv_packet.data());
+    auto * const reply_header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.send_packet.data());
 
-    // ReplyCache contains a packet (length > 0) with the same sequence number, re-send it.
-    if (reply_info.len > 0 && reply_header->sequence == request_header->sequence) {
-        log(LogLevel::NOTICE, "Using a packet from the reply cache (seq {:d})\n", reply_header->sequence);
-        return reply_info.len;
+    // If the ReplyCache contains the same request (including the same sequence number), send back the response from the ReplyCache.
+    if (reply_info.recv_len > 0 && cache_recv_header->sequence == request_header->sequence &&
+        reply_info.recv_len == request_packet_len &&
+        memcmp(reply_info.recv_packet.data(), request_packet, request_packet_len) == 0) {
+        if (reply_info.send_len > 0) {
+            log(LogLevel::NOTICE, "Using a packet from the reply cache (seq {:d})\n", reply_header->sequence);
+            return reply_info.send_len;
+        } else {
+            log(LogLevel::NOTICE,
+                "Request with seq {:d} found in reply cache, but no response exists. Ignoring.\n",
+                request_header->sequence);
+            return -1;
+        }
     }
 
     *reply_header = *request_header;
@@ -1284,13 +1297,12 @@ int main(int argc, char ** argv) {
 
             auto & reply_info = answer_cache.get_reply_info(last_remote_ip, last_remote_port);
             const int send_msg_len = process_request(reply_info, request_packet, request_packet_len);
+
             // update reply cache entry
-            if (send_msg_len >= 0) {
-                reply_info.len = send_msg_len;
-                reply_info.timestamp = time(NULL);
-            } else {
-                reply_info.len = 0;
-            }
+            memcpy(reply_info.recv_packet.data(), request_packet, request_packet_len);
+            reply_info.recv_len = request_packet_len;
+            reply_info.send_len = send_msg_len > 0 ? send_msg_len : 0;
+            reply_info.timestamp = time(NULL);
 
 #ifdef SIMULATE_PACKET_LOSS
             // simulated random ouput packet LOSS
@@ -1302,7 +1314,7 @@ int main(int argc, char ** argv) {
 
             if (send_msg_len > 0) {
                 // fill in header
-                auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.packet.data());
+                auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.send_packet.data());
                 header->length_flags = to_little16(send_msg_len);
                 if (cksumflag != 0) {
                     const uint16_t checksum = bsd_checksum(
@@ -1318,17 +1330,17 @@ int main(int argc, char ** argv) {
 
                 log(LogLevel::DEBUG, "Sending back an answer of {} bytes\n", send_msg_len);
                 if (global_log_level >= LogLevel::TRACE) {
-                    dump_packet(reply_info.packet.data(), send_msg_len);
+                    dump_packet(reply_info.send_packet.data(), send_msg_len);
                 }
                 std::uint16_t sent_bytes;
                 if (sock) {
-                    sent_bytes = sock->send_reply(reply_info.packet.data(), send_msg_len);
+                    sent_bytes = sock->send_reply(reply_info.send_packet.data(), send_msg_len);
                     if (sent_bytes != send_msg_len) {
                         log(LogLevel::ERROR, "reply: {} bytes sent but {} bytes requested\n", sent_bytes, send_msg_len);
                     }
                 } else {
                     try {
-                        slip->send_reply(reply_info.packet.data(), send_msg_len);
+                        slip->send_reply(reply_info.send_packet.data(), send_msg_len);
                     } catch (const std::runtime_error & ex) {
                         log(LogLevel::ERROR, "send_reply: {}\n", ex.what());
                     }
