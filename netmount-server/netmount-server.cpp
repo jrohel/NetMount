@@ -388,7 +388,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             try {
                 drive.set_item_attrs(relative_path, attrs);
             } catch (const std::runtime_error & ex) {
-                log(LogLevel::WARNING,
+                log(LogLevel::ERROR,
                     "SET_ATTRS failed to set 0x{:02X} to \"{:c}:\\{}\": {}\n",
                     attrs,
                     reqdrv + 'A',
@@ -842,6 +842,18 @@ uint16_t bsd_checksum(const void * addr, uint16_t len) {
 
 
 void print_help(const char * program_name) {
+#if DOS_ATTRS_NATIVE == 1
+#define NATIVE ", NATIVE"
+#else
+#define NATIVE
+#endif
+
+#if DOS_ATTRS_IN_EXTENDED == 1
+#define EXTENDED ", EXTENDED"
+#else
+#define EXTENDED
+#endif
+
     print(
         stdout,
         "NetMount server {}, Copyright 2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
@@ -855,7 +867,7 @@ void print_help(const char * program_name) {
         "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
         "[--log-level=<LEVEL>] "
-        "<drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>] "
+        "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>] "
         "[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]\n\n",
         program_name);
 
@@ -871,10 +883,15 @@ void print_help(const char * program_name) {
         "  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)\n"
         "  --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)\n"
         "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve\n"
+        "  attrs=<storage_method>      File attribute storage method: AUTO, IGNORE" NATIVE EXTENDED
+        " (default: AUTO)\n"
         "  label=<volume_label>        volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
         "  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)\n",
         DRIVE_PROTO_UDP_PORT,
         DEFAULT_VOLUME_LABEL);
+
+#undef EXTENDED
+#undef NATIVE
 }
 
 
@@ -940,6 +957,62 @@ int parse_share_definition(std::string_view share) {
 
     while (++offset < share.length()) {
         const auto option = get_token(share, '=', offset);
+        if (option == "attrs") {
+            const auto value = get_token(share, ',', ++offset);
+            const auto upper_value = string_ascii_to_upper(value);
+            if (upper_value == "AUTO") {
+                drive.set_attrs_mode(AttrsMode::AUTO);
+                continue;
+            }
+            if (upper_value == "IGNORE") {
+                drive.set_attrs_mode(AttrsMode::IGNORE);
+                continue;
+            }
+            if (upper_value == "NATIVE") {
+#if DOS_ATTRS_NATIVE == 1
+                if (!is_dos_attrs_native_supported(drive.get_root())) {
+                    print(
+                        stdout,
+                        "Native storage of DOS attributes was requested for drive \"{:c}\", but \"{}\" does not "
+                        "support it\n",
+                        drive_char,
+                        drive.get_root().string());
+                    return -1;
+                }
+                drive.set_attrs_mode(AttrsMode::NATIVE);
+                continue;
+#else
+                print(
+                    stdout,
+                    "This build does not include support for the \"{}\" attribute storage method\n",
+                    upper_value);
+                return -1;
+#endif
+            }
+            if (upper_value == "EXTENDED") {
+#if DOS_ATTRS_IN_EXTENDED == 1
+                if (!is_dos_attrs_in_extended_supported(drive.get_root())) {
+                    print(
+                        stdout,
+                        "Storing DOS attributes in extended attributes was requested for drive \"{:c}\", but \"{}\" "
+                        "does not support it\n",
+                        drive_char,
+                        drive.get_root().string());
+                    return -1;
+                }
+                drive.set_attrs_mode(AttrsMode::IN_EXTENDED);
+                continue;
+#else
+                print(
+                    stdout,
+                    "This build does not include support for the \"{}\" attribute storage method\n",
+                    upper_value);
+                return -1;
+#endif
+            }
+            print(stdout, "Unrecognized attribute storage method: {}\n", value);
+            return -1;
+        }
         if (option == "label") {
             const auto value = get_token(share, ',', ++offset);
             if (!value.empty()) {
@@ -1091,7 +1164,23 @@ int main(int argc, char ** argv) {
     for (auto & drive : drives) {
         if (drive.is_shared()) {
             drives_defined = true;
-            break;
+            if (drive.get_attrs_mode() == AttrsMode::AUTO) {
+#if DOS_ATTRS_NATIVE == 1
+                if (is_dos_attrs_native_supported(drive.get_root())) {
+                    drive.set_attrs_mode(AttrsMode::NATIVE);
+                    continue;
+                }
+#endif
+
+#if DOS_ATTRS_IN_EXTENDED == 1
+                if (is_dos_attrs_in_extended_supported(drive.get_root())) {
+                    drive.set_attrs_mode(AttrsMode::IN_EXTENDED);
+                    continue;
+                }
+#endif
+
+                drive.set_attrs_mode(AttrsMode::IGNORE);
+            }
         }
     }
     if (!drives_defined) {
@@ -1130,29 +1219,24 @@ int main(int argc, char ** argv) {
     signal(SIGINT, signal_handler);
 
     // Print table with shared drives
-#ifdef __linux__
-    bool some_drive_not_fat = false;
-#endif
+    bool print_header = true;
     for (std::size_t i = 0; i < drives.size(); ++i) {
         const auto & drive = drives[i];
         if (!drive.is_shared()) {
             continue;
         }
-#ifdef __linux__
-        if (!drive.is_on_fat()) {
-            some_drive_not_fat = true;
+        if (print_header) {
+            print(stdout, "attrs mode | drive | path\n");
+            print_header = false;
         }
-#endif
-        print(stdout, "{:c} {:c}: => {}\n", drive.is_on_fat() ? ' ' : '*', 'A' + i, drive.get_root().string());
-    }
-#ifdef __linux__
-    if (some_drive_not_fat) {
+        const auto attrs_mode = drive.get_attrs_mode();
         print(
             stdout,
-            "WARNING: It looks like drives marked with '*' are not stored on a FAT file system. "
-            "DOS attributes will not be supported on these drives.\n\n");
+            "{:^11}|   {:c}   | {}\n",
+            attrs_mode == AttrsMode::IN_EXTENDED ? "extended" : (attrs_mode == AttrsMode::NATIVE ? "native" : "ignore"),
+            'A' + i,
+            drive.get_root().string());
     }
-#endif
 
     // main loop
     try {

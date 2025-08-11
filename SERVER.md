@@ -20,7 +20,7 @@
 ./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
 [--log-level=<LEVEL>]
-<drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]
+<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]
 [... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]
 
 Options:
@@ -32,6 +32,7 @@ Options:
   --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
   --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)
   <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
+  attrs=<storage_method>      File attribute storage method: AUTO, IGNORE, NATIVE, EXTENDED (default: AUTO)
   label=<volume_label>        volume label (first 11 chars used, default: NETMOUNT; use "--label=" to remove)
   name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)
 ```
@@ -152,6 +153,55 @@ Example usage:
 `netmount-server C=/share/c,name_conversion=OFF D=/data 'G=/share_with\,comma'`
 
 
+## DOS File/Directory Attributes
+
+The server supports **DOS-style file and directory attributes**, including:
+
+- `ARCHIVE`
+- `HIDDEN`
+- `READONLY`
+- `SYSTEM`
+
+These attributes can be stored and retrieved in various ways, depending on the operating system and file system in use.
+
+### Storage Methods
+
+The storage method for DOS attributes is configured per shared directory using the `attrs=<storage_method>` option:
+
+Where `<storage_method>` can be one of:
+
+| Method     | Description |
+|------------|-------------|
+| `AUTO`     | Automatically selects the best available method. *(Default)* |
+| `IGNORE`   | Ignores all requests to set DOS attributes. Reading returns `ARCHIVE` for files, nothing for directories. |
+| `NATIVE`   | Uses the native OS and file system support for DOS attributes. |
+| `EXTENDED` | Stores a single byte representing DOS attributes in the extended attribute `"user.NetMountAttrs"`. |
+
+### Extended Attributes (`EXTENDED` Method)
+
+When using the `EXTENDED` method, DOS attributes are encoded into a single byte and stored as an **extended attribute** named `"user.NetMountAttrs"`. This allows storing DOS attributes even on file systems that do not support them natively, as long as extended attributes are supported.
+
+Behavior:
+
+- If the extended attribute is **missing**, **default DOS attributes** (`ARCHIVE` for a file, none for a directory) are returned.
+- If the extended attribute exists but is **empty** (zero-length), then **no DOS attributes** are considered set.
+- **Applying default DOS attributes** (`ARCHIVE` for a file, none for a directory) **removes the extended attribute** from the file or directory, if present.
+
+### Platform Support
+
+| Platform   | `IGNORE` | `NATIVE`             | `EXTENDED` | `AUTO` behavior  |
+|------------|----------|----------------------|------------|------------------|
+| **All OS** | yes      | no                   | no         | Uses `IGNORE`    |
+| **Linux**  | yes      | yes (FAT/msdos only) | yes        | Tries `NATIVE`, then `EXTENDED`, then `IGNORE` |
+| **FreeBSD**| yes      | yes (msdosfs only)   | yes        | Tries `NATIVE`, then `EXTENDED`, then `IGNORE` |
+| **Windows**| yes      | yes (via native API) | no         | Uses `NATIVE` |
+
+**Note for Windows**:
+Support for storing DOS attributes depends on the file system drivers in use.
+The default Windows drivers natively support DOS attributes on **FAT**, **NTFS**, **exFAT**, and **ReFS** file systems.
+On other file systems (e.g., network shares or third-party drivers), behavior may vary depending on how the driver implements attribute storage.
+
+
 ## Known limitations
 The shared directory can be on any filesystem. However, if a filesystem other than "msdos" is used,
 various filename restrictions must be taken into account, as NetMount supports DOS Short Names.
@@ -180,10 +230,6 @@ various filename restrictions must be taken into account, as NetMount supports D
 - **DOS further disallows certain control and special characters in file names:** ('', '/', ':', '*',
   '?', '"', '<', '>', '|'). These are omitted during conversion. When conversion is disabled (argument
   `name_conversion=OFF`), these characters are passed unchanged, which may cause issues.
-
-- **Another limitation** is that netmount-server supports FAT attributes (ARCHIVE, HIDDEN, READ-ONLY,
-  SYSTEM) only on Linux, and only when using the "msdos" filesystem. Support for other operating systems
-  and filesystems may be added in the future (for example, by mapping to extended attributes).
 
 
 ## Security

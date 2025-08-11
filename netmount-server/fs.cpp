@@ -51,11 +51,15 @@ namespace {
 // Fills the DosFileProperties structure if `properties` != nullptr.
 // Returns DOS attributes for `path` or FAT_ERROR_ATTR on error.
 // DOS attr flags: 1=RO 2=HID 4=SYS 8=VOL 16=DIR 32=ARCH 64=DEVICE
-uint8_t get_path_dos_properties(const std::filesystem::path & path, DosFileProperties * properties, bool use_fat_ioctl);
+uint8_t get_path_dos_properties(const std::filesystem::path & path, DosFileProperties * properties, AttrsMode mode);
 
 // Sets attributes `attrs` on file defined by `path`.
 // Throws exception on error.
-void set_item_attrs(const std::filesystem::path & path, uint8_t attrs);
+void set_item_attrs(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode);
+
+// Gets attributes of file defined by `path`.
+// Throws exception on error.
+uint8_t get_item_attrs(const std::filesystem::path & path, AttrsMode mode);
 
 // Creates directory `dir`
 // Throws exception on error.
@@ -72,7 +76,7 @@ void change_dir(const std::filesystem::path & dir);
 // Creates or truncates a file `path` with attributes `attrs`.
 // Returns properties of created/truncated file.
 // Throws exception on error.
-DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl);
+DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode);
 
 // Removes `file`
 // Throws exception on error.
@@ -84,9 +88,6 @@ void rename_file(const std::filesystem::path & old_name, const std::filesystem::
 
 // Returns filesystem total size and free space in bytes, or 0, 0 on error
 std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path);
-
-// Returns `true` if `path` is on FAT filesystem
-bool is_on_fat(const std::filesystem::path & path);
 
 // Converts lowercase ascii characters to uppercase and removes illegal characters
 // Returns new length and true if file name was shortened
@@ -148,7 +149,6 @@ void Drive::set_root(std::filesystem::path root) {
     }
     this->root = std::move(root);
     used = true;
-    on_fat = ::netmount_srv::is_on_fat(this->root);
 }
 
 
@@ -331,7 +331,7 @@ int32_t Drive::get_file_size(uint16_t handle) {
     auto & item = get_item(handle);
 
     DosFileProperties fprops;
-    if (get_path_dos_properties(item.path, &fprops, 0) == FAT_ERROR_ATTR) {
+    if (get_path_dos_properties(item.path, &fprops, AttrsMode::IGNORE) == FAT_ERROR_ATTR) {
         return -1;
     }
 
@@ -515,9 +515,10 @@ void Drive::change_dir(const std::filesystem::path & client_path) {
 
 
 void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t attrs) {
-    if (is_on_fat()) {
+    const auto attrs_mode = get_attrs_mode();
+    if (attrs_mode != AttrsMode::IGNORE) {
         auto [server_path, exist] = create_server_path(client_path);
-        netmount_srv::set_item_attrs(server_path, attrs);
+        netmount_srv::set_item_attrs(server_path, attrs, attrs_mode);
 
         // Recreates directory_list
         create_server_path(client_path, true);
@@ -533,7 +534,7 @@ uint8_t Drive::get_dos_properties(const std::filesystem::path & client_path, Dos
 
 uint8_t Drive::get_server_path_dos_properties(
     const std::filesystem::path & server_path, DosFileProperties * properties) {
-    return get_path_dos_properties(server_path, properties, is_on_fat());
+    return get_path_dos_properties(server_path, properties, get_attrs_mode());
 }
 
 
@@ -550,7 +551,7 @@ void Drive::rename_file(const std::filesystem::path & old_client_path, const std
 void Drive::delete_files(const std::filesystem::path & client_pattern) {
     const auto [server_path, exist] = create_server_path(client_pattern);
 
-    if (get_path_dos_properties(server_path, NULL, is_on_fat()) & FAT_RO) {
+    if (get_path_dos_properties(server_path, NULL, get_attrs_mode()) & FAT_RO) {
         throw FilesystemError("Access denied: Read only FAT file system", DOS_EXTERR_ACCESS_DENIED);
     }
 
@@ -621,7 +622,7 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
 
 
 DosFileProperties Drive::create_or_truncate_file(const std::filesystem::path & server_path, uint8_t attrs) {
-    return netmount_srv::create_or_truncate_file(server_path, attrs, is_on_fat());
+    return netmount_srv::create_or_truncate_file(server_path, attrs, get_attrs_mode());
 }
 
 
@@ -667,7 +668,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                     for (const auto name : {".", ".."}) {
                         const auto fullpath = path / name;
                         DosFileProperties fprops;
-                        get_path_dos_properties(fullpath, &fprops, drive.is_on_fat());
+                        get_path_dos_properties(fullpath, &fprops, drive.get_attrs_mode());
                         fprops.fcb_name = short_name_to_fcb(name);
                         if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
                             fprops.server_name = name;
@@ -691,7 +692,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
             DosFileProperties fprops;
             auto path = dentry.path();
             auto filename = path.filename();
-            get_path_dos_properties(path, &fprops, drive.is_on_fat());
+            get_path_dos_properties(path, &fprops, drive.get_attrs_mode());
             if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
                 file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
                 fprops.server_name = filename;
@@ -854,11 +855,13 @@ bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::
 
 
 uint8_t get_path_dos_properties(
-    const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] bool use_fat_ioctl) {
+    const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] AttrsMode mode) {
     struct stat statbuf;
-    if (stat(path.string().c_str(), &statbuf) != 0) {
+    if (stat(path.string().c_str(), &statbuf) == -1) {
         return FAT_ERROR_ATTR;  // error (probably doesn't exist)
     }
+
+    uint8_t attrs = S_ISDIR(statbuf.st_mode) ? FAT_DIRECTORY : 0;
 
     if (properties) {
         // set file fcbname to the file part of path (ignore traling directory separators)
@@ -868,70 +871,61 @@ uint8_t get_path_dos_properties(
         properties->fcb_name = short_name_to_fcb(it->string());
 
         properties->time_date = time_to_fat(statbuf.st_mtime);
-    }
+        properties->attrs = attrs;
 
-    if (S_ISDIR(statbuf.st_mode)) {
-        if (properties) {
+        if (S_ISDIR(statbuf.st_mode)) {
             properties->size = 0;
-            properties->attrs = FAT_DIRECTORY;
+        } else {
+            properties->size = statbuf.st_size;
         }
-        return FAT_DIRECTORY;
     }
 
-    // not a directory, set size
-    if (properties) {
-        properties->size = statbuf.st_size;
-    }
-
-#ifdef __linux__
-    // if not a FAT drive, return a fake attribute archive
-    if (!use_fat_ioctl) {
+    try {
+        attrs |= get_item_attrs(path, mode);
         if (properties) {
-            properties->attrs = FAT_ARCHIVE;
+            properties->attrs = attrs;
         }
-        return FAT_ARCHIVE;
+        return attrs;
+    } catch (const std::runtime_error & ex) {
+        log(LogLevel::ERROR, "get_path_dos_properties: {}\n", ex.what());
     }
 
-    // try to fetch DOS attributes from filesystem
-    auto fd = open(path.string().c_str(), O_RDONLY);
-    if (fd == -1) {
-        return FAT_ERROR_ATTR;
+    return FAT_ERROR_ATTR;
+}
+
+
+void set_item_attrs(
+    [[maybe_unused]] const std::filesystem::path & path,
+    [[maybe_unused]] uint8_t attrs,
+    [[maybe_unused]] AttrsMode mode) {
+#if DOS_ATTRS_NATIVE == 1
+    if (mode == AttrsMode::NATIVE) {
+        set_dos_attrs_native(path, attrs);
     }
-    uint32_t attr;
-    if (ioctl(fd, FAT_IOCTL_GET_ATTRIBUTES, &attr) < 0) {
-        log(LogLevel::ERROR, "get_path_dos_properties: Failed to fetch attributes of \"{}\"\n", path.string());
-        close(fd);
-        return 0;
-    } else {
-        close(fd);
-        if (properties) {
-            properties->attrs = attr;
-        }
-        return attr;
+#endif
+
+#if DOS_ATTRS_IN_EXTENDED == 1
+    if (mode == AttrsMode::IN_EXTENDED) {
+        set_dos_attrs_to_extended(path, attrs);
     }
-#else
-    if (properties) {
-        properties->attrs = FAT_ARCHIVE;
-    }
-    return FAT_ARCHIVE;
 #endif
 }
 
 
-void set_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe_unused]] uint8_t attrs) {
-#ifdef __linux__
-    int fd, res;
-    fd = open(path.string().c_str(), O_RDONLY);
-    if (fd == -1) {
-        throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
-    }
-    res = ioctl(fd, FAT_IOCTL_SET_ATTRIBUTES, &attrs);
-    auto orig_errno = errno;
-    close(fd);
-    if (res < 0) {
-        throw std::runtime_error(std::format("Cannot set file attributes: {}", strerror(orig_errno)));
+uint8_t get_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe_unused]] AttrsMode mode) {
+#if DOS_ATTRS_NATIVE == 1
+    if (mode == AttrsMode::NATIVE) {
+        return get_dos_attrs_native(path);
     }
 #endif
+
+#if DOS_ATTRS_IN_EXTENDED == 1
+    if (mode == AttrsMode::IN_EXTENDED) {
+        return get_dos_attrs_from_extended(path);
+    }
+#endif
+
+    return std::filesystem::is_directory(path) ? 0 : FAT_ARCHIVE;
 }
 
 
@@ -956,7 +950,7 @@ void delete_dir(const std::filesystem::path & dir) {
 void change_dir(const std::filesystem::path & dir) { std::filesystem::current_path(dir); }
 
 
-DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, bool use_fat_ioctl) {
+DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode) {
     // try to create/truncate the file
     FILE * const fd = fopen(path.string().c_str(), "wb");
     if (!fd) {
@@ -965,9 +959,9 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
     fclose(fd);
 
     // set FAT attributes
-    if (use_fat_ioctl) {
+    if (mode != AttrsMode::IGNORE) {
         try {
-            set_item_attrs(path, attrs);
+            set_item_attrs(path, attrs, mode);
         } catch (const std::runtime_error & ex) {
             log(LogLevel::ERROR,
                 "create_or_truncate_file: Failed to set attribute 0x{:02X} to \"{}\": {}\n",
@@ -978,7 +972,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
     }
 
     DosFileProperties properties;
-    get_path_dos_properties(path, &properties, use_fat_ioctl);
+    get_path_dos_properties(path, &properties, mode);
     return properties;
 }
 
@@ -1004,25 +998,6 @@ void rename_file(const std::filesystem::path & old_name, const std::filesystem::
 std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path) {
     const auto info = std::filesystem::space(path);
     return {info.capacity, info.free};
-}
-
-
-bool is_on_fat([[maybe_unused]] const std::filesystem::path & path) {
-#ifdef __linux__
-    auto fd = open(path.string().c_str(), O_RDONLY);
-    if (fd == -1)
-        return false;
-    uint32_t volid;
-    // try to get FAT volume id
-    if (ioctl(fd, FAT_IOCTL_GET_VOLUME_ID, &volid) < 0) {
-        close(fd);
-        return false;
-    }
-    close(fd);
-    return true;
-#else
-    return false;
-#endif
 }
 
 }  // namespace

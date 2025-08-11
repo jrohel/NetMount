@@ -5,6 +5,7 @@
 #define _FS_HPP_
 
 #include "../shared/dos.h"
+#include "config.hpp"
 
 #include <stdint.h>
 #include <string.h>
@@ -16,6 +17,7 @@
 #include <vector>
 
 // FAT attributes
+#define FAT_NONE      0x00  // no attribute bits
 #define FAT_RO        0x01
 #define FAT_HIDDEN    0x02
 #define FAT_SYSTEM    0x04
@@ -40,6 +42,8 @@
 
 
 namespace netmount_srv {
+
+enum class AttrsMode { AUTO, IGNORE, NATIVE, IN_EXTENDED };
 
 class FilesystemError : public std::runtime_error {
 public:
@@ -70,10 +74,11 @@ public:
     // Returns root path of shared drive.
     const std::filesystem::path & get_root() const noexcept { return root; }
 
-    // Returns true if the shared drive is on FAT filesystem.
-    bool is_on_fat() const noexcept { return on_fat; }
+    void set_attrs_mode(AttrsMode mode) { attrs_mode = mode; }
 
-    // Sets `root` for this drive. Initialize `used` and `on_fat`.
+    AttrsMode get_attrs_mode() const noexcept { return attrs_mode; }
+
+    // Sets `root` for this drive. Initialize `used`.
     void set_root(std::filesystem::path root);
 
     void set_volume_label(const std::string & label);
@@ -167,7 +172,7 @@ private:
     std::filesystem::path root;
     fcb_file_name volume_label;
     bool has_volume_label{false};
-    bool on_fat;
+    AttrsMode attrs_mode{AttrsMode::AUTO};
     FileNameConversion name_conversion{FileNameConversion::RAM};
 
     class Item {
@@ -194,6 +199,19 @@ private:
 
 // convert short file name to fcb_file_name structure
 fcb_file_name short_name_to_fcb(const std::string & short_name) noexcept;
+
+#if DOS_ATTRS_NATIVE == 1
+bool is_dos_attrs_native_supported(const std::filesystem::path & path);
+uint8_t get_dos_attrs_native(const std::filesystem::path & path);
+void set_dos_attrs_native(const std::filesystem::path & path, uint8_t attrs);
+#endif
+
+#if DOS_ATTRS_IN_EXTENDED == 1
+bool is_dos_attrs_in_extended_supported(const std::filesystem::path & path);
+uint8_t get_dos_attrs_from_extended(const std::filesystem::path & path);
+void set_dos_attrs_to_extended(const std::filesystem::path & path, uint8_t attrs);
+#endif
+
 }  // namespace netmount_srv
 
 #endif
