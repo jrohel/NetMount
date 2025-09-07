@@ -1,3 +1,106 @@
+# 1.5.0 (2025-09-08)
+
+## Features
+
+- **Support storing DOS attributes on FreeBSD, Linux, and Windows**
+
+    Previously, DOS attributes (`ARCHIVE`, `HIDDEN`, `READONLY`, `SYSTEM`) were
+    only supported on Linux and only when using the FAT file system. This commit
+    extends support to FreeBSD and Windows, and adds the ability to use
+    additional file systems.
+
+    DOS attributes can now be stored using either native file system support
+    or extended attributes (`"user.NetMountAttrs"`). This allows DOS attributes
+    to be stored even on file systems that do not natively support them,
+    as long as they support extended attributes.
+
+    Support for storing attributes on directories has also been added;
+    previously, only files were supported.
+
+    A new shared directory option was introduced:
+
+    `attrs=<storage_method>`  Method to store DOS attributes:
+                              `AUTO`, `IGNORE`, `NATIVE`, `EXTENDED` (default: `AUTO`)
+
+    - `AUTO`     - Automatically select the best available method.
+
+    - `IGNORE`   - Ignore all DOS attribute requests. Reading returns
+                 `ARCHIVE` for files, none for directories.
+
+    - `NATIVE`   - Use OS-native support (typically via file system).
+
+    - `EXTENDED` - Store one-byte DOS attributes in the extended attribute
+                 `"user.NetMountAttrs"`.
+
+    Method support by OS:
+
+    - All platforms support `IGNORE`.
+
+    - FreeBSD and Linux support `NATIVE` (FAT only) and `EXTENDED`.
+      `AUTO` mode on these systems prefers:
+
+        1. `NATIVE` (if supported)
+        2. `EXTENDED` (if supported)
+        3. `IGNORE` (as fallback)
+
+    - Windows supports `NATIVE` (via standard API) and defaults to it in `AUTO` mode.
+
+- **Check DOS `READONLY` attribute when opening for write, writing, or deleting**
+
+    When running on Windows, the server uses native support for DOS
+    attributes, and the operating system itself enforces `READONLY` checks
+    before write or delete operations. However, on other operating systems
+    - especially when DOS attributes are stored as extended attributes -
+    the OS ignores them, treating them as regular user data.
+
+    The server now explicitly checks the DOS `READONLY` attribute before
+    allowing operations that would modify a file, such as opening for writing,
+    writing to the file, deleting a file, or removing a directory. This ensures
+    access control when sharing files with DOS-style attributes.
+
+- **Support Unicode filenames on Windows**
+
+    Thanks to support for mapping long and non-ASCII filenames to
+    the DOS 8.3 format, it is possible to share files with non-ASCII names.
+    The issue occurred when running on Windows, where the `fopen`, `rename`,
+    `stat`, and `truncate` functions use the local 8-bit encoding for
+    filenames, which depends on the system locale.
+
+    The `rename` and `stat` functions have been replaced with C++
+    `std::filesystem` equivalents, which work correctly with UTF-16
+    on Windows. The `fopen` function has been replaced with
+    the Windows-specific `_wfopen`, which supports UTF-16.
+    The `truncate` function has been reimplemented specifically for Windows.
+
+## Other
+
+- **ReplyCache – check whole request, cache no responses**
+
+    The response uses the same sequence number as the request. Originally,
+    the server only checked whether the cached response had the same
+    sequence number as the newly received request. If so, the request
+    was not processed further and the cached response was reused.
+
+    Now, the request itself is also stored in the cache, not just
+    the response. When a new request arrives with the same sequence number,
+    its length is compared first, and if it matches, the entire content
+    of the request is compared as well.
+
+    This prevents a situation where a response to a previous request could
+    be incorrectly reused for a different request with the same sequence
+    number. While such collisions are rare, they can occur - for example,
+    if a client's last request used sequence number 1 and the client
+    then restarted, it might send a different request with the same sequence
+    number (1) after restart.
+
+    Another change concerns requests that do not trigger a response
+    (malformed requests). Previously, repeated invalid requests would be
+    reprocessed each time. Now, such requests are also cached along
+    with the information that no response was sent, preventing repeated
+    processing.
+
+----
+
 # 1.4.2 (2025-07-20)
 
 ## Optimizations
