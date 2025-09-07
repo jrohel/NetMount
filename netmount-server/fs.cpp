@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <compare>
 #include <exception>
 #include <format>
@@ -77,6 +78,10 @@ void change_dir(const std::filesystem::path & dir);
 // Returns properties of created/truncated file.
 // Throws exception on error.
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode);
+
+// Resize file
+// Throws exception on error.
+void resize_file(const std::filesystem::path & path, uint32_t new_size);
 
 // Removes `file`
 // Throws exception on error.
@@ -269,32 +274,35 @@ const std::filesystem::path & Drive::get_handle_path(uint16_t handle) {
 
 
 int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
-    long res;
-    FILE * fd;
     auto & item = get_item(handle);
     const auto & fname = item.path;
 
     item.update_last_used_timestamp();
 
-    fd = fopen(fname.string().c_str(), "rb");
+#ifdef _WIN32
+    auto * const fd = _wfopen(fname.c_str(), L"rb");
+#else
+    auto * const fd = fopen(fname.c_str(), "rb");
+#endif
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
+
     if (fseek(fd, offset, SEEK_SET) != 0) {
-        auto orig_errno = errno;
+        const auto orig_errno = errno;
         fclose(fd);
         throw std::runtime_error(std::format("Cannot seek in file: {}", strerror(orig_errno)));
     }
-    res = fread(buffer, 1, len, fd);
+
+    const auto res = fread(buffer, 1, len, fd);
+
     fclose(fd);
 
-    return res;
+    return static_cast<int32_t>(res);
 }
 
 
 int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
-    int32_t res;
-    FILE * fd;
     auto & item = get_item(handle);
     const auto & fname = item.path;
 
@@ -303,27 +311,32 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
     // len 0 means "truncate" or "extend"
     if (len == 0) {
         log(LogLevel::DEBUG, "write_file: truncate \"{}\" to {} bytes\n", fname.string(), offset);
-        if (truncate(fname.string().c_str(), offset) != 0) {
-            throw std::runtime_error(std::format("Cannot truncate file: {}", strerror(errno)));
-        }
+        resize_file(fname, offset);
         return 0;
     }
 
     //  write to file
     log(LogLevel::DEBUG, "write_file: write {} bytes into file \"{}\" at offset {}\n", len, fname.string(), offset);
-    fd = fopen(fname.string().c_str(), "r+b");
+#ifdef _WIN32
+    auto * const fd = _wfopen(fname.c_str(), L"r+b");
+#else
+    auto * const fd = fopen(fname.c_str(), "r+b");
+#endif
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
+
     if (fseek(fd, offset, SEEK_SET) != 0) {
-        auto orig_errno = errno;
+        const auto orig_errno = errno;
         fclose(fd);
         throw std::runtime_error(std::format("Cannot seek in file: {}", strerror(orig_errno)));
     }
-    res = fwrite(buffer, 1, len, fd);
+
+    const auto res = fwrite(buffer, 1, len, fd);
+
     fclose(fd);
 
-    return res;
+    return static_cast<int32_t>(res);
 }
 
 
@@ -856,12 +869,11 @@ bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::
 
 uint8_t get_path_dos_properties(
     const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] AttrsMode mode) {
-    struct stat statbuf;
-    if (stat(path.string().c_str(), &statbuf) == -1) {
+    std::error_code ec;
+    uint8_t attrs = std::filesystem::is_directory(path, ec) ? FAT_DIRECTORY : 0;
+    if (ec) {
         return FAT_ERROR_ATTR;  // error (probably doesn't exist)
     }
-
-    uint8_t attrs = S_ISDIR(statbuf.st_mode) ? FAT_DIRECTORY : 0;
 
     if (properties) {
         // set file fcbname to the file part of path (ignore traling directory separators)
@@ -870,13 +882,33 @@ uint8_t get_path_dos_properties(
         }
         properties->fcb_name = short_name_to_fcb(it->string());
 
-        properties->time_date = time_to_fat(statbuf.st_mtime);
+        time_t seconds = 0;
+        std::error_code ec;
+        auto ftime = std::filesystem::last_write_time(path, ec);
+        if (!ec) {
+#if __cpp_lib_chrono >= 201907L
+            // C++20 and newer
+            // This path uses std::chrono::clock_cast, which is the preferred and safest method.
+            auto sctp = std::chrono::clock_cast<std::chrono::system_clock>(ftime);
+#else
+            // Fallback for older compilers lacking C++20 support
+            // This manual conversion is less robust but works as an alternative.
+            auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                ftime - std::chrono::file_clock::now() + std::chrono::system_clock::now());
+#endif
+            seconds = std::chrono::system_clock::to_time_t(sctp);
+        }
+        properties->time_date = time_to_fat(seconds);
+
         properties->attrs = attrs;
 
-        if (S_ISDIR(statbuf.st_mode)) {
+        if (attrs == FAT_DIRECTORY) {
             properties->size = 0;
         } else {
-            properties->size = statbuf.st_size;
+            properties->size = std::filesystem::file_size(path, ec);
+            if (ec) {
+                properties->size = 0;
+            }
         }
     }
 
@@ -952,7 +984,11 @@ void change_dir(const std::filesystem::path & dir) { std::filesystem::current_pa
 
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode) {
     // try to create/truncate the file
-    FILE * const fd = fopen(path.string().c_str(), "wb");
+#ifdef _WIN32
+    auto * const fd = _wfopen(path.c_str(), L"wb");
+#else
+    auto * const fd = fopen(path.c_str(), "wb");
+#endif
     if (!fd) {
         throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
     }
@@ -977,6 +1013,37 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
 }
 
 
+void resize_file(const std::filesystem::path & path, uint32_t new_size) {
+#if defined(__cpp_lib_filesystem) && (__cpp_lib_filesystem >= 202002L)
+    // Use C++23 std::filesystem::resize_file if available
+    try {
+        std::filesystem::resize_file(path, new_size);
+        return;
+    } catch (const std::filesystem::filesystem_error &) {
+        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(errno)));
+    }
+#else
+    // Fallback to platform-specific implementation
+#ifdef _WIN32
+    FILE * const f = _wfopen(path.c_str(), L"r+b");
+    if (!f) {
+        throw std::runtime_error(std::format("Cannot open file for resize: {}", strerror(errno)));
+    }
+    const int fd = _fileno(f);
+    const auto err = _chsize_s(fd, new_size);
+    fclose(f);
+    if (err != 0) {
+        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(err)));
+    }
+#else
+    if (truncate(path.string().c_str(), new_size) != 0) {
+        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(errno)));
+    }
+#endif
+#endif
+}
+
+
 void delete_file(const std::filesystem::path & file) {
     if (!std::filesystem::exists(file)) {
         throw FilesystemError("delete_files: File does not exist: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
@@ -989,8 +1056,11 @@ void delete_file(const std::filesystem::path & file) {
 
 
 void rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name) {
-    if (rename(old_name.string().c_str(), new_name.string().c_str()) != 0) {
-        throw std::runtime_error("rename_file: Cannot rename " + old_name.string() + " to " + new_name.string());
+    std::error_code ec;
+    std::filesystem::rename(old_name, new_name, ec);
+    if (ec) {
+        throw std::runtime_error(
+            "rename_file: Cannot rename " + old_name.string() + " to " + new_name.string() + ": " + ec.message());
     }
 }
 
