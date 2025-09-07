@@ -308,6 +308,12 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
 
     item.update_last_used_timestamp();
 
+    if (get_server_path_attrs(fname) & FAT_RO) {
+        throw FilesystemError(
+            std::format("Access denied: File \"{}\" has the READ_ONLY attribute", fname.string()),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     // len 0 means "truncate" or "extend"
     if (len == 0) {
         log(LogLevel::DEBUG, "write_file: truncate \"{}\" to {} bytes\n", fname.string(), offset);
@@ -509,8 +515,14 @@ void Drive::make_dir(const std::filesystem::path & client_path) {
 void Drive::delete_dir(const std::filesystem::path & client_path) {
     auto [server_path, exist] = create_server_path(client_path);
     if (!exist) {
-        throw std::runtime_error("delete_dir: Directory does not exist: " + server_path.string());
+        throw FilesystemError(
+            "delete_dir: Directory does not exist: " + server_path.string(), DOS_EXTERR_PATH_NOT_FOUND);
     }
+
+    if (get_server_path_attrs(server_path) & FAT_RO) {
+        throw FilesystemError("Access denied: Directory has the READ_ONLY attribute", DOS_EXTERR_ACCESS_DENIED);
+    }
+
     netmount_srv::delete_dir(server_path);
 
     // Recreates directory_list
@@ -539,6 +551,11 @@ void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t at
 }
 
 
+uint8_t Drive::get_server_path_attrs(const std::filesystem::path & server_path) {
+    return get_item_attrs(server_path, get_attrs_mode());
+}
+
+
 uint8_t Drive::get_dos_properties(const std::filesystem::path & client_path, DosFileProperties * properties) {
     auto [server_path, exist] = create_server_path(client_path);
     return get_server_path_dos_properties(server_path, properties);
@@ -564,11 +581,12 @@ void Drive::rename_file(const std::filesystem::path & old_client_path, const std
 void Drive::delete_files(const std::filesystem::path & client_pattern) {
     const auto [server_path, exist] = create_server_path(client_pattern);
 
-    if (get_path_dos_properties(server_path, NULL, get_attrs_mode()) & FAT_RO) {
-        throw FilesystemError("Access denied: Read only FAT file system", DOS_EXTERR_ACCESS_DENIED);
-    }
-
     if (exist) {
+        if (get_server_path_attrs(server_path) & FAT_RO) {
+            throw FilesystemError(
+                std::format("Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
+                DOS_EXTERR_ACCESS_DENIED);
+        }
         netmount_srv::delete_file(server_path);
         return;
     }
@@ -603,6 +621,12 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             // if match, delete the file
             const auto & path_str = dentry.path().string();
             if (match_fcb_name_to_mask(filfcb, short_name_to_fcb(path_str))) {
+                if (get_server_path_attrs(dentry.path()) & FAT_RO) {
+                    log(LogLevel::WARNING,
+                        "Access denied: File \"{}\" has the READ_ONLY attribute",
+                        dentry.path().string());
+                    continue;
+                }
                 std::error_code ec;
                 if (!std::filesystem::remove(dentry.path(), ec)) {
                     log(LogLevel::ERROR, "delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
@@ -624,6 +648,10 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
 
         if (match_fcb_name_to_mask(filfcb, file_properties.fcb_name)) {
             const auto path = directory / file_properties.server_name;
+            if (get_server_path_attrs(path) & FAT_RO) {
+                log(LogLevel::WARNING, "Access denied: File \"{}\" has the READ_ONLY attribute", path.string());
+                continue;
+            }
             try {
                 netmount_srv::delete_file(path);
             } catch (const std::runtime_error & ex) {

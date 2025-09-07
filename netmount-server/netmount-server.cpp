@@ -682,11 +682,24 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         if (attr == 0xFF || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
                             error = true;
                         }
+                        if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
+                            throw FilesystemError(
+                                std::format(
+                                    "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
+                        }
                     } else if (function == INT2F_CREATE_FILE) {
                         log(LogLevel::DEBUG,
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
                             server_path.string(),
                             stack_attr);
+                        if (std::filesystem::exists(server_path) &&
+                            (drive.get_server_path_attrs(server_path) & FAT_RO)) {
+                            throw FilesystemError(
+                                std::format(
+                                    "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
+                        }
                         properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                         result_open_mode = 2;  // read/write
                     } else {
@@ -720,6 +733,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             error = true;
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
+                            if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
+                                throw FilesystemError(
+                                    std::format(
+                                        "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
+                                    DOS_EXTERR_ACCESS_DENIED);
+                            }
                             if ((action_code & IF_EXIST_MASK) == ACTION_CODE_OPEN_IF_EXIST) {
                                 log(LogLevel::DEBUG, "open file\n");
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
@@ -770,6 +789,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         reply_packet_len = sizeof(drive_proto_open_create_reply);
                     }
                 }
+            } catch (const FilesystemError & ex) {
+                log(LogLevel::WARNING, "OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ex.what());
+                *ax = to_little16(ex.get_dos_err_code());
             } catch (const std::runtime_error & ex) {
                 log(LogLevel::WARNING, "OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ex.what());
                 *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);

@@ -29,6 +29,11 @@
 // Invalid attrtibutes, we use it to return error
 #define FAT_ERROR_ATTR 0xFF
 
+// Open modes
+#define OPEN_MODE_RDONLY 0x00
+#define OPEN_MODE_WRONLY 0x01
+#define OPEN_MODE_RDWR   0x02
+
 // Action code use low nibble for DOES exist file
 #define IF_EXIST_MASK                0x0F
 #define ACTION_CODE_FAIL_IF_EXIST    0x00
@@ -142,6 +147,10 @@ public:
     /// Sets attributes `attrs` on file defined by `client_path`.
     /// Throws exception on error.
     void set_item_attrs(const std::filesystem::path & client_path, uint8_t attrs);
+
+    /// Gets attributes of file defined by `server_path`.
+    /// Throws exception on error.
+    uint8_t get_server_path_attrs(const std::filesystem::path & server_path);
 
     /// Fills the DosFileProperties structure if `properties` != nullptr.
     /// Returns DOS attributes for `client_path` or FAT_ERROR_ATTR on error.
