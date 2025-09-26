@@ -2288,6 +2288,11 @@ int main(int argc, char * argv[]) {
         pktdrv_release_type(shared_data_ptr->ipv4_pkthandle);
         pktdrv_release_type(shared_data_ptr->arp_pkthandle);
 
+        // Get the address (segment) of the environment from the PSP and release the environment from memory
+        struct psp __far * psp_ptr = MK_FP(shared_data_ptr->psp_segment, 0);
+        free_memory(psp_ptr->env_segment);
+
+        // Release the PSP and the program from memory (the program immediately follows the PSP)
         free_memory(shared_data_ptr->psp_segment);
 
         return EXIT_OK;
