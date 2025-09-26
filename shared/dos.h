@@ -240,6 +240,35 @@ struct dos_list_of_list {
     uint8_t last_drive;
 };
 
+
+// DOS Program Segment Prefix (PSP)
+struct psp {
+    uint8_t int20h[2];            // 0x00–0x01: INT 20h instruction (CP/M-style exit)
+    uint16_t mem_size_segment;    // 0x02–0x03: Segment of first byte beyond allocated memory
+    uint8_t reserved1;            // 0x04: Reserved
+    uint8_t dos_far_call[5];      // 0x05–0x09: Far call into DOS (CP/M-like)
+    uint32_t old_int22h;          // 0x0A–0x0D: Old INT 22h - terminate address
+    uint32_t old_int23h;          // 0x0E–0x11: Old INT 23h - break handler
+    uint32_t old_int24h;          // 0x12–0x15: Old INT 24h - critical error handler
+    uint16_t parent_psp_segment;  // 0x16–0x17: Parent's PSP segment
+    uint8_t job_file_table[20];   // 0x18–0x2B: Job File Table (JFT)
+    uint16_t env_segment;         // 0x2C–0x2D: Segment address of environment block
+    uint32_t last_ss_sp;          // 0x2E–0x31: SS:SP on entry to last INT 21h
+    uint16_t jft_size;            // 0x32–0x33: JFT size
+    uint32_t jft_pointer;         // 0x34–0x37: Pointer to JFT
+    uint32_t prev_psp_pointer;    // 0x38–0x3B: Pointer to previous PSP (used by SHARE)
+    uint8_t reserved2[4];         // 0x3C–0x3F: Reserved
+    uint16_t dos_version;         // 0x40–0x41: DOS version to return
+    uint8_t reserved3[14];        // 0x42–0x4F: Reserved
+    uint8_t int21h_retf[3];       // 0x50–0x52: Far call to DOS (INT 21h + RETF)
+    uint8_t reserved4[2];         // 0x53–0x54: Reserved
+    uint8_t reserved5[7];         // 0x55–0x5B: Reserved (used for extended FCB)
+    uint8_t fcb1[16];             // 0x5C–0x6B: Unopened Standard FCB 1
+    uint8_t fcb2[20];             // 0x6C–0x7F: Unopened Standard FCB 2
+    uint8_t cmd_length;           // 0x80: Command-line length in bytes
+    uint8_t cmd_tail[127];        // 0x81–0xFF: Command-line tail (args + terminating 0Dh)
+};
+
 #pragma pack(pop)
 
 #endif
