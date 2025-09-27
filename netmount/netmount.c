@@ -677,8 +677,9 @@ static uint16_t send_request(
     if (frame_length - sizeof(struct mac_hdr) > getptr_shared_data()->interface_mtu)
         return 0;
 
-    volatile struct ip_mac_map * const ip_to_mac_map =
-        &getptr_shared_data()->ip_mac_map[getptr_shared_data()->drives[local_drive].remote_ip_idx];
+    struct drive_info const * const drv_info = &getptr_shared_data()->drives[local_drive];
+
+    volatile struct ip_mac_map * const ip_to_mac_map = &getptr_shared_data()->ip_mac_map[drv_info->remote_ip_idx];
 
     if (!getptr_shared_data()->disable_sending_arp_request) {
         // Checks if the destination HW address is known. If not, we will try to discover it using ARP requests.
@@ -713,9 +714,9 @@ static uint16_t send_request(
     create_udp(
         &frame->udp,
         getptr_shared_data()->local_port,
-        getptr_shared_data()->drives[local_drive].remote_port,
+        drv_info->remote_port,
         sizeof(struct drive_proto_hdr) + request_data_len);
-    getptr_shared_data()->last_remote_udp_port = getptr_shared_data()->drives[local_drive].remote_port;
+    getptr_shared_data()->last_remote_udp_port = drv_info->remote_port;
 
     uint8_t * const last_sent_sequence_num_ptr = getptr_global_request_last_sent_seq_num();
     ++*last_sent_sequence_num_ptr;
@@ -728,7 +729,7 @@ static uint16_t send_request(
     snd_drive_proto->sequence = sequence_num;  // sequence number
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
-    if (getptr_shared_data()->drives[local_drive].enabled_checksums & CHECKSUM_NETMOUNT_PROTO) {
+    if (drv_info->enabled_checksums & CHECKSUM_NETMOUNT_PROTO) {
         snd_drive_proto->length_flags |= 0x8000U;  // switch checksum on
         snd_drive_proto->checksum = bsd_checksum(
             (uint8_t *)(&snd_drive_proto->checksum + 1),
@@ -742,11 +743,11 @@ static uint16_t send_request(
     volatile int16_t * const recvrequest_data_len_ptr = getptr_global_recv_data_len();
 
     // minimum and maximum configured timeout for the processed drive
-    uint16_t rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].min_rcv_tmo_18_2_ticks_shr_2 << 2;
-    const uint16_t max_rcv_tmo_18_2_ticks = getptr_shared_data()->drives[local_drive].max_rcv_tmo_18_2_ticks_shr_2 << 2;
+    uint16_t rcv_tmo_18_2_ticks = drv_info->min_rcv_tmo_18_2_ticks_shr_2 << 2;
+    const uint16_t max_rcv_tmo_18_2_ticks = drv_info->max_rcv_tmo_18_2_ticks_shr_2 << 2;
 
     // maximum configured request retries for the processed drive
-    const uint8_t max_request_retries = getptr_shared_data()->drives[local_drive].max_request_retries;
+    const uint8_t max_request_retries = drv_info->max_request_retries;
 
     // lowest 16 bits of timer. Warning: this location won't increment while interrupts are disabled!
     volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
@@ -796,7 +797,7 @@ static uint16_t send_request(
             if (rcv_drive_proto->length_flags & 0x8000U) {
                 // the received data contains a checksum
                 // if enabled, check the received checksum
-                if ((getptr_shared_data()->drives[local_drive].enabled_checksums & CHECKSUM_NETMOUNT_PROTO) &&
+                if ((drv_info->enabled_checksums & CHECKSUM_NETMOUNT_PROTO) &&
                     (bsd_checksum(
                          (uint8_t *)(&rcv_drive_proto->checksum + 1),
                          len - ((uint8_t *)(&rcv_drive_proto->checksum + 1) - (uint8_t *)rcv_drive_proto)) !=
@@ -2632,17 +2633,19 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_FREE_SLOT_FOR_REMOTE_IP;
         }
 
-        shared_data_ptr->drives[drive_no].remote_ip_idx = remote_ip_idx;
-        shared_data_ptr->drives[drive_no].remote_port = remote_port;
+        struct drive_info __far * const drv_info = &shared_data_ptr->drives[drive_no];
+
+        drv_info->remote_ip_idx = remote_ip_idx;
+        drv_info->remote_port = remote_port;
         shared_data_ptr->ldrv[drive_no] = remote_drive_no;
 
         // Convert timeouts to 18.2 Hz ticks (2 least significant bits ignored). Uses only integer operations.
-        shared_data_ptr->drives[drive_no].min_rcv_tmo_18_2_ticks_shr_2 = ((min_rcv_tmo_sec * 182) / 10) >> 2;
-        shared_data_ptr->drives[drive_no].max_rcv_tmo_18_2_ticks_shr_2 = ((max_rcv_tmo_sec * 182) / 10) >> 2;
+        drv_info->min_rcv_tmo_18_2_ticks_shr_2 = ((min_rcv_tmo_sec * 182) / 10) >> 2;
+        drv_info->max_rcv_tmo_18_2_ticks_shr_2 = ((max_rcv_tmo_sec * 182) / 10) >> 2;
 
-        shared_data_ptr->drives[drive_no].max_request_retries = max_request_retries;
+        drv_info->max_request_retries = max_request_retries;
 
-        shared_data_ptr->drives[drive_no].enabled_checksums = enabled_checksums;
+        drv_info->enabled_checksums = enabled_checksums;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)
