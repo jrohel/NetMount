@@ -1746,16 +1746,45 @@ static void __declspec(naked) int2F_redirector(void) {
 static void __declspec(naked) resident_part_end_mark(void) {}
 
 
+// Interprets an unsigned integer value in the string `str`.
+// The numeric base is auto-detected: if the prefix is 0x or 0X, the base is hexadecimal,
+// otherwise the base is decimal.
+// endptr - output pointer set to the first unparsed character
 uint16_t strto_ui16(const char * restrict str, const char ** restrict endptr) {
     uint16_t number = 0;
-    while (*str >= '0' && *str <= '9') {
-        number *= 10;
-        number += *str - '0';
+
+    int base = 10;
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        base = 16;
+        str += 2;
+    }
+
+    while (1) {
+        const char c = *str;
+        uint8_t digit;
+
+        if (c >= '0' && c <= '9') {
+            digit = c - '0';
+        } else if (c >= 'A' && c <= 'F') {
+            digit = c - 'A' + 10;
+        } else if (c >= 'a' && c <= 'f') {
+            digit = c - 'a' + 10;
+        } else {
+            break;
+        }
+
+        if (digit >= base) {
+            break;
+        }
+
+        number = number * base + digit;
         ++str;
     }
+
     if (endptr) {
         *endptr = str;
     }
+
     return number;
 }
 
