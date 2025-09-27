@@ -2288,10 +2288,6 @@ int main(int argc, char * argv[]) {
         pktdrv_release_type(shared_data_ptr->ipv4_pkthandle);
         pktdrv_release_type(shared_data_ptr->arp_pkthandle);
 
-        // Get the address (segment) of the environment from the PSP and release the environment from memory
-        struct psp __far * psp_ptr = MK_FP(shared_data_ptr->psp_segment, 0);
-        free_memory(psp_ptr->env_segment);
-
         // Release the PSP and the program from memory (the program immediately follows the PSP)
         free_memory(shared_data_ptr->psp_segment);
 
@@ -2499,6 +2495,11 @@ int main(int argc, char * argv[]) {
         getptr_shared_data()->orig_INT2F_handler = *getptr_global_orig_INT2F_handler();
         getptr_shared_data()->int2F_redirector_offset = get_offset(int2F_redirector);
         getptr_shared_data()->pktdrv_INT_handler = *getptr_global_pktdrv_INT_handler();
+
+        // Get the address (segment) of the environment from the PSP and release the environment from memory
+        struct psp __far * psp_ptr = MK_FP(getptr_shared_data()->psp_segment, 0);
+        free_memory(psp_ptr->env_segment);
+        psp_ptr->env_segment = 0;  // The memory has been released; let's not reference it anymore
 
         terminate_remain_resident(EXIT_OK, ((unsigned)get_offset(resident_part_end_mark) + PROGRAM_OFFSET + 15) >> 4);
     }
