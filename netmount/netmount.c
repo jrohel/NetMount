@@ -1857,6 +1857,7 @@ static uint8_t is_redir_install_allowed(void);
     "dec al" modify[ax] value[al]
 
 
+// DOS 1+ - SET INTERRUPT VECTOR
 static void set_intr_vector(uint8_t num, interrupt_handler handler);
 #pragma aux set_intr_vector = \
     "push ds"                 \
@@ -1867,6 +1868,7 @@ static void set_intr_vector(uint8_t num, interrupt_handler handler);
     "pop ds" parm[al][dx es] modify[ah]
 
 
+// DOS 2+ - GET INTERRUPT VECTOR
 static interrupt_handler get_intr_vector(uint8_t num);
 #pragma aux get_intr_vector = \
     "mov ah, 0x35"            \
@@ -1908,6 +1910,7 @@ static struct dos_current_dir __far * get_cds(uint8_t drive_no) {
 }
 
 
+// DOS 2+ - TERMINATE AND STAY RESIDENT
 static void terminate_remain_resident(uint8_t exit_code, uint16_t memsize_in_paragraphs);
 #pragma aux terminate_remain_resident aborts
 #pragma aux terminate_remain_resident = \
@@ -1915,16 +1918,22 @@ static void terminate_remain_resident(uint8_t exit_code, uint16_t memsize_in_par
     "int 0x21" parm[al][dx]
 
 
+// DOS 3.0+ - GET CURRENT PSP ADDRESS
 static uint16_t get_current_psp_address_segment(void);
 #pragma aux get_current_psp_address_segment = \
     "mov ah, 0x62"                            \
     "int 0x21" modify exact[ah bx] value[bx]
 
 
+// DOS 2+ - FREE MEMORY
+// returns error code, 0 - no error
 static uint16_t free_memory(uint16_t segment);
 #pragma aux free_memory = \
     "mov ah, 0x49"        \
-    "int 0x21" parm[es] modify exact[ax] value[ax]
+    "int 0x21"            \
+    "jc error"            \
+    "xor ax, ax"          \
+    "error:" parm[es] modify exact[ax] value[ax]
 
 
 static uint16_t get_CS(void);
