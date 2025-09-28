@@ -24,6 +24,7 @@
 #define DEFAULT_MAX_RCV_TMO_SECONDS     5
 #define DEFAULT_MAX_NUM_REQUEST_RETRIES 4
 #define DEFAULT_ENABLED_CHECKSUMS       (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
+#define FILE_BUFFER_SIZE                64  // power of two, maximum 128
 
 #define MAX_INTERFACE_MTU 1500
 
@@ -101,6 +102,16 @@ struct shared_data {
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
+struct file_buffer {
+    uint32_t timestamp;
+    uint32_t offset;
+    uint16_t start_cluster;
+    uint8_t drive_no;
+    uint8_t valid_bytes;
+    uint8_t data[FILE_BUFFER_SIZE];
+};
+#define FILE_BUFFER_STRUCT_SIZE (FILE_BUFFER_SIZE + 12)
+typedef char st_assert_READ_AHEAD_CACHE_SIZE[FILE_BUFFER_STRUCT_SIZE == sizeof(struct file_buffer) ? 1 : -1];
 
 static void * get_offset(const void * func);
 #pragma aux get_offset = parm[bx] modify exact[] value[bx]
@@ -133,9 +144,17 @@ CS_VARIABLE(global_ipv4_last_sent_packet_id, uint16_t, 2)  // id inserted into l
 CS_VARIABLE(global_request_last_sent_seq_num, uint8_t, 1)  // sequence number inserted into last request packet
 CS_VARIABLE(global_sda_ptr, struct dos_sda __far *, 4)     // ptr to DOS SDA (set at startup, used by interrupt handler)
 CS_VARIABLE(shared_data, struct shared_data, SHARED_DATA_SIZE)  // shared between NetMount processes
+CS_VARIABLE(
+    read_file_buffer, struct file_buffer, FILE_BUFFER_STRUCT_SIZE)  // buffer for last readed file data from server
 
 
 #define swap_word(value) (uint16_t)((uint16_t)value << 8 | (uint16_t)value >> 8)
+
+
+static inline uint8_t min_u8(uint8_t a, uint8_t b) { return a < b ? a : b; }
+
+
+static inline uint16_t min_u16(uint16_t a, uint16_t b) { return a < b ? a : b; }
 
 
 // Copy string without terminating zero from src_pos. Return length of dst string or negative value if src_pos is bigger theh source length.
@@ -859,6 +878,15 @@ static void handle_request_for_our_drive(void) {
 
     volatile int16_t * const recvbufflen_ptr = getptr_global_recv_data_len();
 
+    // Timer. The default frequency is 18.2 Hz.
+    volatile uint32_t __far * const time = (uint32_t __far *)0x46C;
+
+    struct file_buffer * const read_buffer = getptr_read_file_buffer();
+    if (read_buffer->valid_bytes > 0 && *time - read_buffer->timestamp > 5 * 18) {
+        // Keep file_buffer data valid for no more than 5 seconds.
+        read_buffer->valid_bytes = 0;
+    }
+
     switch (subfunction) {
         case INT2F_REMOVE_DIR:
         case INT2F_MAKE_DIR:
@@ -975,14 +1003,93 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            // split read request into chunks that fit into a network frame
             uint16_t total_read_len = 0;
+
+            const int is_below_min_read_len = r->w.cx < sizeof(read_buffer->data);
+            if (is_below_min_read_len) {
+                // Use data from the read buffer, if available.
+                if (read_buffer->valid_bytes > 0 && read_buffer->drive_no == reqdrv &&
+                    read_buffer->start_cluster == sftptr->start_cluster) {
+                    const uint32_t buffer_offset = sftptr->file_pos & ~((uint32_t)(sizeof(read_buffer->data) - 1));
+                    if (buffer_offset == read_buffer->offset) {
+                        const uint8_t data_offset = sftptr->file_pos - buffer_offset;
+                        if (data_offset < read_buffer->valid_bytes) {
+                            total_read_len = min_u8(r->w.cx, read_buffer->valid_bytes - data_offset);
+                            my_memcpy_ff(sda_ptr->curr_dta, read_buffer->data + data_offset, total_read_len);
+                            if (total_read_len == r->w.cx) {
+                                // all requested data were in read_buffer
+                                // update SFT and break out
+                                sftptr->file_pos += total_read_len;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Requesting data from the server that was not cached in the read buffer.
+                // Fetching sufficient data to refill the read buffer.
+                const uint32_t buffer_offset =
+                    (sftptr->file_pos + r->w.cx) & ~((uint32_t)(sizeof(read_buffer->data) - 1));
+                uint16_t bytes_to_read = sizeof(read_buffer->data);
+                uint32_t read_offset;
+                if (buffer_offset > (sftptr->file_pos + total_read_len)) {
+                    bytes_to_read += buffer_offset - (sftptr->file_pos + total_read_len);
+                    read_offset = sftptr->file_pos + total_read_len;
+                } else {
+                    read_offset = buffer_offset;
+                }
+
+                struct drive_proto_readf * const args = (struct drive_proto_readf * const)buff;
+                args->offset = read_offset;
+                args->start_cluster = sftptr->start_cluster;
+                args->length = bytes_to_read;
+                uint16_t len = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax);
+                if (len == NETWORK_ERROR) {
+                    set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
+                    break;
+                } else if (ax != 0) {
+                    set_error(r, ax);
+                    break;
+                } else {  // success
+                    if (read_offset + len > buffer_offset) {
+                        read_buffer->drive_no = reqdrv;
+                        read_buffer->start_cluster = sftptr->start_cluster;
+                        read_buffer->offset = buffer_offset;
+                        read_buffer->valid_bytes = read_offset + len - buffer_offset;
+                        read_buffer->timestamp = *time;
+                        my_memcpy_ff(
+                            read_buffer->data,
+                            reply + (buffer_offset - read_offset),
+                            read_offset + len - buffer_offset);
+                    }
+
+                    const uint16_t offset_in_reply = sftptr->file_pos + total_read_len - read_offset;
+                    if (len > offset_in_reply) {
+                        len -= offset_in_reply;
+                        if (len > r->w.cx - total_read_len) {
+                            len = r->w.cx - total_read_len;
+                        }
+                        my_memcpy_ff(sda_ptr->curr_dta + total_read_len, reply + offset_in_reply, len);
+                    } else {
+                        len = 0;
+                    }
+
+                    total_read_len += len;
+                    // update SFT and break out
+                    sftptr->file_pos += total_read_len;
+                    r->w.cx = total_read_len;
+                    break;
+                }
+            }
+
+            // A request for a sufficiently large block of data.
+            // Fetching data from the server, bypassing the read buffer.
+            // split read request into chunks that fit into a network frame
             const uint16_t max_chunk_len =
                 getptr_shared_data()->interface_mtu + sizeof(struct mac_hdr) - DRIVE_DATA_OFFSET;
             for (;;) {
                 uint16_t len;
-                const uint16_t chunklen =
-                    r->w.cx - total_read_len > max_chunk_len ? max_chunk_len : r->w.cx - total_read_len;
+                const uint16_t chunklen = min_u16(r->w.cx - total_read_len, max_chunk_len);
                 struct drive_proto_readf * const args = (struct drive_proto_readf * const)buff;
                 args->offset = sftptr->file_pos + total_read_len;
                 args->start_cluster = sftptr->start_cluster;
@@ -998,7 +1105,7 @@ static void handle_request_for_our_drive(void) {
                     my_memcpy_ff(sda_ptr->curr_dta + total_read_len, reply, len);
                     total_read_len += len;
                     if ((len < chunklen) || (total_read_len == r->w.cx)) {
-                        // EOF - update SFT and break out
+                        // update SFT and break out
                         sftptr->file_pos += total_read_len;
                         r->w.cx = total_read_len;
                         break;
@@ -1025,6 +1132,15 @@ static void handle_request_for_our_drive(void) {
             if ((sftptr->open_mode & 3) == 0) {
                 set_error(r, DOS_EXTERR_ACCESS_DENIED);
                 break;
+            }
+
+            // invalidate the read buffer if writing to the buffered area of the file
+            if (read_buffer->valid_bytes > 0 && read_buffer->drive_no == reqdrv &&
+                read_buffer->start_cluster == sftptr->start_cluster) {
+                if ((sftptr->file_pos < read_buffer->offset + read_buffer->valid_bytes) &&
+                    (sftptr->file_pos + r->w.cx > read_buffer->offset)) {
+                    read_buffer->valid_bytes = 0;
+                }
             }
 
             // TODO: From EtherDFS - I should update the file's time in the SFT here

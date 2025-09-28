@@ -138,6 +138,40 @@ speed, it still ensures reliable functionality.
     `netmount mount 192.168.200.2/C H`
 
 
+## Read-ahead buffering
+
+Some applications read files in very small blocks (e.g., 4 bytes at a time). The application
+would request 4 bytes, then another 4 bytes after receiving the first, and so on. Reading
+a 10 KB file 4 bytes at a time results in 2,500 network requests, which is extremely inefficient.
+In the extreme case - reading byte by byte it is 10,000 network requests.
+
+Over Ethernet, each such request carries around 50 bytes of headers (MAC, IP, UDP, NetMount),
+plus additional low-level preambles and checksums - all for just a few bytes of actual data.
+On high-throughput networks, latency becomes the limiting factor. Even on a local network
+with 1 ms latency, 2,500 requests would take about 2.5 seconds to complete - a transfer
+rate of just 4 KB/s when reading in 4-byte blocks. When reading byte by byte, this drops to 1 KB/s.
+Over Wi-Fi with poor signal or over the Internet (e.g., with 20 ms latency), transfer speeds
+can fall to just a few hundred bytes per second.
+
+To address this, the NetMount client uses 64-byte buffer for read-ahead buffering. When reading files,
+it requests at least 64 bytes from the server to fill this buffer, assuming the next reads will be
+sequential and can be served directly from the buffer. Although 64 bytes is relatively small,
+this change results in up to 64x faster reads when the application reads 1 byte at a time, and
+16x faster for 4-byte blocks. Read-ahead buffering also reduces the load on the network and
+the NetMount server. Serving a single 64-byte read is much less demanding than handling 16 separate
+4-byte requests, or 64 one-byte requests.
+
+Read-ahead buffering is only applied when the read request is smaller than 64 bytes. Larger reads
+bypass the buffer. A slowdown could occur if the application performs many small reads
+from random offsets that fall outside of the buffered data. This read-ahead buffering never
+increases the number of requests - only the number of bytes in responses may be larger.
+
+Since the server-side data is not locked, there is a risk that it may be modified by another
+application or client at any time. To avoid serving invalid data from the buffer,
+its contents are considered valid for at most 5 seconds. After this period, the buffer
+is invalidated and the next read will fetch fresh data from the server.
+
+
 ## Sharing a Network Interface Between NetMount and Other Applications
 
 For each network interface card (NIC), only one packet driver can be installed in the system.
