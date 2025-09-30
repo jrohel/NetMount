@@ -20,9 +20,9 @@
 
 // Program parameters
 #define ENABLE_DRIVE_PROTO_CHECKSUM     1
-#define DEFAULT_MIN_RCV_TMO_SECONDS     1  // If it is changed, adjust the help
-#define DEFAULT_MAX_RCV_TMO_SECONDS     5  // If it is changed, adjust the help
-#define DEFAULT_MAX_NUM_REQUEST_RETRIES 4  // If it is changed, adjust the help
+#define DEFAULT_MIN_RCV_TMO_SECONDS     1
+#define DEFAULT_MAX_RCV_TMO_SECONDS     5
+#define DEFAULT_MAX_NUM_REQUEST_RETRIES 4
 #define DEFAULT_ENABLED_CHECKSUMS       (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
 
 #define MAX_INTERFACE_MTU 1500
@@ -56,10 +56,10 @@
 
 typedef void(__interrupt * interrupt_handler)(void);
 
-#define MAX_DRIVERS_COUNT 26
+#define MAX_DRIVES_COUNT 26
 struct shared_data {
-    uint8_t ldrv[MAX_DRIVERS_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
-                                      // must be first in structure, used in assembler
+    uint8_t ldrv[MAX_DRIVES_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
+                                     // must be first in structure, used in assembler
     struct drive_info {
         uint8_t remote_ip_idx;  // index of server ip address in ip_mac_map table
         uint16_t remote_port;
@@ -67,7 +67,7 @@ struct shared_data {
         uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_request_retries;           // Maximum number of request retries
         uint8_t enabled_checksums;
-    } drives[MAX_DRIVERS_COUNT];
+    } drives[MAX_DRIVES_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
     uint16_t local_port;
@@ -1663,7 +1663,7 @@ static void __declspec(naked) int2F_redirector(void) {
 
     validate_drive_no:
         // test if the drive is in our mount table?
-        cmp bl, MAX_DRIVERS_COUNT
+        cmp bl, MAX_DRIVES_COUNT
         jge invalid_drive_no
         push bx
         xor bh, bh
@@ -1995,12 +1995,12 @@ static uint8_t assign_remote_ip_addr_slot(struct shared_data __far * shared_data
                     continue;  // skip, used by gateway
                 }
 
-                uint8_t driver_id = 0;  // skip, used by mounted drive
-                while (driver_id < MAX_DRIVERS_COUNT && shared_data_ptr->drives[driver_id].remote_ip_idx != i) {
-                    ++driver_id;
+                uint8_t drive_no = 0;  // skip, used by mounted drive
+                while (drive_no < MAX_DRIVES_COUNT && shared_data_ptr->drives[drive_no].remote_ip_idx != i) {
+                    ++drive_no;
                 }
 
-                if (driver_id == MAX_DRIVERS_COUNT) {
+                if (drive_no == MAX_DRIVES_COUNT) {
                     free_ip_idx = ip_idx = i;
                     break;
                 }
@@ -2217,53 +2217,56 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     return 0;
 }
 
+#define STRINGIFY(x) #x
+#define TOSTRING(x)  STRINGIFY(x)
 
 static void print_help(void) {
-    my_print_dos_string("NetMount " PROGRAM_VERSION
-                        ", Copyright 2024-2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
-                        "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
-                        "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n"
-                        "\r\n"
-                        "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
-                        "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n"
-                        "         [/MTU:<size>] [/NO_ARP_REQUESTS]\r\n"
-                        "\r\n"
-                        "NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]\r\n"
-                        "         [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]\r\n"
-                        "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
-                        "         <local_drive_letter>\r\n"
-                        "\r\n"
-                        "NETMOUNT UMOUNT <local_drive_letter>\r\n"
-                        "\r\n"
-                        "NETMOUNT UMOUNT /ALL\r\n"
-                        "\r\n"
-                        "NETMOUNT UNINSTALL\r\n"
-                        "\r\n"
-                        "Commands:\r\n"
-                        "INSTALL                   Installs NetMount as resident (TSR)\r\n"
-                        "MOUNT                     Mounts remote drive as local drive\r\n"
-                        "UMOUNT                    Unmounts local drive(s) from remote drive\r\n"
-                        "UNINSTALL                 Uninstall NetMount\r\n"
-                        "\r\n"
-                        "Arguments:\r\n"
-                        "/IP:<local_ipv4_addr>     Sets local IP address\r\n"
-                        "/PORT:<local_udp_port>    Sets local UDP port. 12200 by default\r\n"
-                        "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
-                        "                          First found in range 0x60 - 0x80 by default.\r\n"
-                        "/MASK:<net_mask>          Sets network mask\r\n"
-                        "/GW:<gateway_addr>        Sets gateway address\r\n"
-                        "/MTU:<size>               Interface MTU (560-1500, default 1500)\r\n"
-                        "/NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed\r\n"
-                        "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
-                        "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
-                        "/ALL                      Unmount all drives\r\n"
-                        "<remote_ipv4_addr>        Specifies IP address of remote server\r\n"
-                        "<remote_udp_port>         Specifies remote UDP port. 12200 by default\r\n"
-                        "/CHECKSUMS:<names>        Enabled checksums (IP_HEADER,NETMOUNT; both default)\r\n"
-                        "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)\r\n"
-                        "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)\r\n"
-                        "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)\r\n"
-                        "/?                        Display this help\r\n$");
+    my_print_dos_string(
+        "NetMount " PROGRAM_VERSION
+        ", Copyright 2024-2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
+        "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
+        "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n"
+        "\r\n"
+        "NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]\r\n"
+        "         [/PORT:<local_udp_port>] [/PKT_INT:<packet_driver_int>]\r\n"
+        "         [/MTU:<size>] [/NO_ARP_REQUESTS]\r\n"
+        "\r\n"
+        "NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]\r\n"
+        "         [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]\r\n"
+        "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
+        "         <local_drive_letter>\r\n"
+        "\r\n"
+        "NETMOUNT UMOUNT <local_drive_letter>\r\n"
+        "\r\n"
+        "NETMOUNT UMOUNT /ALL\r\n"
+        "\r\n"
+        "NETMOUNT UNINSTALL\r\n"
+        "\r\n"
+        "Commands:\r\n"
+        "INSTALL                   Installs NetMount as resident (TSR)\r\n"
+        "MOUNT                     Mounts remote drive as local drive\r\n"
+        "UMOUNT                    Unmounts local drive(s) from remote drive\r\n"
+        "UNINSTALL                 Uninstall NetMount\r\n"
+        "\r\n"
+        "Arguments:\r\n"
+        "/IP:<local_ipv4_addr>     Sets local IP address\r\n"
+        "/PORT:<local_udp_port>    Sets local UDP port. " TOSTRING(DRIVE_PROTO_UDP_PORT) " by default\r\n"
+        "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
+        "                          First found in range 0x60 - 0x80 by default.\r\n"
+        "/MASK:<net_mask>          Sets network mask\r\n"
+        "/GW:<gateway_addr>        Sets gateway address\r\n"
+        "/MTU:<size>               Interface MTU (560-" TOSTRING(MAX_INTERFACE_MTU) ", default " TOSTRING(DEFAULT_INTERFACE_MTU) ")\r\n"
+        "/NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed\r\n"
+        "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
+        "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
+        "/ALL                      Unmount all drives\r\n"
+        "<remote_ipv4_addr>        Specifies IP address of remote server\r\n"
+        "<remote_udp_port>         Specifies remote UDP port. " TOSTRING(DRIVE_PROTO_UDP_PORT) " by default\r\n"
+        "/CHECKSUMS:<names>        Enabled checksums (IP_HEADER,NETMOUNT; both default)\r\n"
+        "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default " TOSTRING(DEFAULT_MIN_RCV_TMO_SECONDS) ")\r\n"
+        "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default " TOSTRING(DEFAULT_MAX_RCV_TMO_SECONDS) ")\r\n"
+        "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default " TOSTRING(DEFAULT_MAX_NUM_REQUEST_RETRIES) ")\r\n"
+        "/?                        Display this help\r\n$");
 }
 
 
@@ -2310,7 +2313,7 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_LAST_IN_INT2F_CHAIN;
         }
 
-        for (int drive_no = 0; drive_no < MAX_DRIVERS_COUNT; ++drive_no) {
+        for (int drive_no = 0; drive_no < MAX_DRIVES_COUNT; ++drive_no) {
             if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
                 my_print_dos_string("NetMount cannot be removed: mounted drives detected\r\n$");
                 return EXIT_DRIVE_MOUNTED;
@@ -2468,8 +2471,6 @@ int main(int argc, char * argv[]) {
         uint16_to_str(getptr_shared_data()->used_pktdrv_int, num_int, sizeof(num_int), 16, '0');
         my_print_string(num_int);
         my_print_dos_string("\r\n$");
-        //printf("Packet driver ARP handler: %d\n", getptr_shared_data()->arp_pkthandle);
-        //printf("Packet driver IPv4 handler: %d\n", getptr_shared_data()->ipv4_pkthandle);
 
         pktdrv_getaddr(&getptr_shared_data()->local_mac_addr, getptr_shared_data()->ipv4_pkthandle);
         my_print_dos_string("Detected local MAC address $");
@@ -2572,7 +2573,7 @@ int main(int argc, char * argv[]) {
                     return EXIT_BAD_ARG;
                 }
                 remote_drive_no = drive_to_num(endptr[1]);
-                if (remote_drive_no >= MAX_DRIVERS_COUNT) {
+                if (remote_drive_no >= MAX_DRIVES_COUNT) {
                     my_print_dos_string("Bad remote drive letter\r\n$");
                     return EXIT_BAD_DRIVE_LETTER;
                 }
@@ -2583,7 +2584,7 @@ int main(int argc, char * argv[]) {
                 }
 
                 drive_no = drive_to_num(argv[i][0]);
-                if (drive_no >= MAX_DRIVERS_COUNT) {
+                if (drive_no >= MAX_DRIVES_COUNT) {
                     my_print_dos_string("Bad local drive letter\r\n$");
                     return EXIT_BAD_DRIVE_LETTER;
                 }
@@ -2705,7 +2706,7 @@ int main(int argc, char * argv[]) {
         int retval = EXIT_OK;
 
         if (strn_upper_cmp(argv[2], "/ALL", 5) == 0) {
-            for (int drive_no = 0; drive_no < MAX_DRIVERS_COUNT; ++drive_no) {
+            for (int drive_no = 0; drive_no < MAX_DRIVES_COUNT; ++drive_no) {
                 if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
                     retval |= umount(shared_data_ptr, drive_no);
                 }
@@ -2713,7 +2714,7 @@ int main(int argc, char * argv[]) {
 
         } else {
             const uint8_t drive_no = drive_to_num(argv[2][0]);
-            if (drive_no >= MAX_DRIVERS_COUNT) {
+            if (drive_no >= MAX_DRIVES_COUNT) {
                 my_print_dos_string("Bad local drive letter\r\n$");
                 return EXIT_BAD_DRIVE_LETTER;
             }
