@@ -1789,20 +1789,27 @@ uint16_t strto_ui16(const char * restrict str, const char ** restrict endptr) {
 }
 
 
-static union ipv4_addr parse_ipv4_addr(const char * restrict str, const char ** restrict endptr) {
+static union ipv4_addr parse_ipv4_addr(const char * restrict str, int * error, const char ** restrict endptr) {
     union ipv4_addr addr;
     const char * local_endptr;
     int idx;
+    int err = 0;
     for (idx = 0; idx < 3; ++idx) {
         addr.bytes[idx] = strto_ui16(str, &local_endptr);
         if (local_endptr == str || *local_endptr != '.') {
-            //error
+            err = 1;
+            break;
         }
         str = local_endptr + 1;
     }
-    addr.bytes[idx] = strto_ui16(str, &local_endptr);
-    if (local_endptr == str) {
-        //error
+    if (!err) {
+        addr.bytes[idx] = strto_ui16(str, &local_endptr);
+        if (local_endptr == str) {
+            err = 1;
+        }
+    }
+    if (error) {
+        *error = err;
     }
     if (endptr) {
         *endptr = local_endptr;
@@ -2388,34 +2395,61 @@ int main(int argc, char * argv[]) {
                 return EXIT_UNKNOWN_ARG;
             }
             if (strn_upper_cmp(argv[i] + 1, "IP:", 3) == 0) {
-                getptr_shared_data()->local_ipv4 = parse_ipv4_addr(argv[i] + 4, NULL);
+                const char * endptr;
+                int error;
+                getptr_shared_data()->local_ipv4 = parse_ipv4_addr(argv[i] + 4, &error, &endptr);
+                if (error || *endptr != '\0') {
+                    my_print_dos_string("Error: Invalid IP address\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 local_ip_set = 1;
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MASK:", 5) == 0) {
-                getptr_shared_data()->net_mask = parse_ipv4_addr(argv[i] + 6, NULL);
+                const char * endptr;
+                int error;
+                getptr_shared_data()->net_mask = parse_ipv4_addr(argv[i] + 6, &error, &endptr);
+                if (error || *endptr != '\0') {
+                    my_print_dos_string("Error: Invalid network mask\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "GW:", 3) == 0) {
-                const union ipv4_addr gw = parse_ipv4_addr(argv[i] + 4, NULL);
+                const char * endptr;
+                int error;
+                const union ipv4_addr gw = parse_ipv4_addr(argv[i] + 4, &error, &endptr);
+                if (error || *endptr != '\0') {
+                    my_print_dos_string("Error: Invalid GW address\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 getptr_shared_data()->gateway_ip_slot = assign_remote_ip_addr_slot(getptr_shared_data(), gw);
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "PORT:", 5) == 0) {
                 const char * endptr;
                 getptr_shared_data()->local_port = strto_ui16(argv[i] + 6, &endptr);
+                if (getptr_shared_data()->local_port == 0) {
+                    my_print_dos_string("Error: Local UDP port must be in range 1-65535\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "PKT_INT:", 8) == 0) {
                 const char * endptr;
                 getptr_shared_data()->requested_pktdrv_int = strto_ui16(argv[i] + 9, &endptr);
+                if (getptr_shared_data()->requested_pktdrv_int < 0x60) {
+                    my_print_dos_string("Error: Packet driver interrupt must be in range 0x60-0xFF\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MTU:", 4) == 0) {
                 const char * endptr;
                 getptr_shared_data()->interface_mtu = strto_ui16(argv[i] + 5, &endptr);
                 if (getptr_shared_data()->interface_mtu > 1500 || getptr_shared_data()->interface_mtu < 560) {
-                    my_print_dos_string("Error: Interface MTU must be in the range 560-1500.\r\n$");
+                    my_print_dos_string(
+                        "Error: Interface MTU must be in the range 560-" TOSTRING(MAX_INTERFACE_MTU) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
@@ -2431,7 +2465,7 @@ int main(int argc, char * argv[]) {
         }
 
         if (!local_ip_set) {
-            my_print_dos_string("Local IP must be set!\r\n$");
+            my_print_dos_string("Error: Local IP must be set!\r\n$");
             return EXIT_MISSING_ARG;
         }
 
@@ -2440,7 +2474,7 @@ int main(int argc, char * argv[]) {
             uint8_t mask_byte = getptr_shared_data()->net_mask.bytes[byte_idx];
             for (int i = 8; i > 0; --i) {
                 if (prev_bit && !(mask_byte & 1)) {
-                    my_print_dos_string("Incorrect network mask.\r\n$");
+                    my_print_dos_string("Error: Invalid network mask\r\n$");
                     return EXIT_BAD_NET_MASK;
                 }
                 prev_bit = mask_byte & 1;
@@ -2564,9 +2598,18 @@ int main(int argc, char * argv[]) {
             if (argv[i][0] != '/') {
                 // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
                 const char * endptr;
-                remote_ip = parse_ipv4_addr(argv[i], &endptr);
+                int error;
+                remote_ip = parse_ipv4_addr(argv[i], &error, &endptr);
+                if (error) {
+                    my_print_dos_string("Error: Invalid remote IP address\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 if (*endptr == ':') {
                     remote_port = strto_ui16(endptr + 1, &endptr);
+                    if (remote_port == 0) {
+                        my_print_dos_string("Error: Remote UDP port must be in range 1-65535\r\n$");
+                        return EXIT_BAD_ARG;
+                    }
                 }
                 if (*endptr != '/') {
                     my_print_dos_string("Bad remote drive specification\r\n$");
@@ -2616,16 +2659,28 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "MIN_RCV_TMO:", 12) == 0) {
                 const char * endptr;
                 min_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
+                if (min_rcv_tmo_sec < 1 || min_rcv_tmo_sec > 56) {
+                    my_print_dos_string("Error: Minimum response timeout must be in range 1-56\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MAX_RCV_TMO:", 12) == 0) {
                 const char * endptr;
                 max_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
+                if (max_rcv_tmo_sec < 1 || max_rcv_tmo_sec > 56) {
+                    my_print_dos_string("Error: Maximum response timeout must be in range 1-56\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MAX_RETRIES:", 12) == 0) {
                 const char * endptr;
                 max_request_retries = strto_ui16(argv[i] + 13, &endptr);
+                if (endptr == argv[i] + 13 || max_request_retries > 254) {
+                    my_print_dos_string("Error: Maximum request retries must be in range 0-254\r\n$");
+                    return EXIT_BAD_ARG;
+                }
                 continue;
             }
             my_print_dos_string("Error: Unknown argument: $");
