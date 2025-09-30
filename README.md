@@ -27,6 +27,7 @@ NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
 
 NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]
          [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]
+         [/MIN_READ_LEN:<length>]
          <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
          <local_drive_letter>
 
@@ -60,6 +61,7 @@ Arguments:
 /MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)
 /MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)
 /MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)
+/MIN_READ_LEN:<length>    Minimum data read len (0-64, power of 2, default 64)
 /?                        Display this help
 ```
 

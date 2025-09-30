@@ -68,6 +68,7 @@ struct shared_data {
         uint8_t max_rcv_tmo_18_2_ticks_shr_2;  // Maximum response timeout ((sec * 18.2) >> 2, clock 18.2 Hz)
         uint8_t max_request_retries;           // Maximum number of request retries
         uint8_t enabled_checksums;
+        uint8_t min_server_read_len;  // Minimum length of data block read from the server
     } drives[MAX_DRIVES_COUNT];
     union ipv4_addr local_ipv4;
     union ipv4_addr net_mask;
@@ -98,7 +99,7 @@ struct shared_data {
     interrupt_handler pktdrv_INT_handler;
 };
 
-#define SHARED_DATA_SIZE 293  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
+#define SHARED_DATA_SIZE 319  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
 // something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
 
@@ -1005,12 +1006,15 @@ static void handle_request_for_our_drive(void) {
 
             uint16_t total_read_len = 0;
 
-            const int is_below_min_read_len = r->w.cx < sizeof(read_buffer->data);
+            struct drive_info const * const drv_info = &getptr_shared_data()->drives[reqdrv];
+            const int is_below_min_read_len = r->w.cx < drv_info->min_server_read_len;
             if (is_below_min_read_len) {
+                const uint32_t buffer_alignment_mask = ~((uint32_t)(drv_info->min_server_read_len - 1));
+
                 // Use data from the read buffer, if available.
                 if (read_buffer->valid_bytes > 0 && read_buffer->drive_no == reqdrv &&
                     read_buffer->start_cluster == sftptr->start_cluster) {
-                    const uint32_t buffer_offset = sftptr->file_pos & ~((uint32_t)(sizeof(read_buffer->data) - 1));
+                    const uint32_t buffer_offset = sftptr->file_pos & buffer_alignment_mask;
                     if (buffer_offset == read_buffer->offset) {
                         const uint8_t data_offset = sftptr->file_pos - buffer_offset;
                         if (data_offset < read_buffer->valid_bytes) {
@@ -1028,9 +1032,8 @@ static void handle_request_for_our_drive(void) {
 
                 // Requesting data from the server that was not cached in the read buffer.
                 // Fetching sufficient data to refill the read buffer.
-                const uint32_t buffer_offset =
-                    (sftptr->file_pos + r->w.cx) & ~((uint32_t)(sizeof(read_buffer->data) - 1));
-                uint16_t bytes_to_read = sizeof(read_buffer->data);
+                const uint32_t buffer_offset = (sftptr->file_pos + r->w.cx) & buffer_alignment_mask;
+                uint16_t bytes_to_read = drv_info->min_server_read_len;
                 uint32_t read_offset;
                 if (buffer_offset > (sftptr->file_pos + total_read_len)) {
                     bytes_to_read += buffer_offset - (sftptr->file_pos + total_read_len);
@@ -2356,6 +2359,7 @@ static void print_help(void) {
         "\r\n"
         "NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]\r\n"
         "         [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]\r\n"
+        "         [/MIN_READ_LEN:<length>]\r\n"
         "         <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>\r\n"
         "         <local_drive_letter>\r\n"
         "\r\n"
@@ -2389,6 +2393,7 @@ static void print_help(void) {
         "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default " TOSTRING(DEFAULT_MIN_RCV_TMO_SECONDS) ")\r\n"
         "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default " TOSTRING(DEFAULT_MAX_RCV_TMO_SECONDS) ")\r\n"
         "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default " TOSTRING(DEFAULT_MAX_NUM_REQUEST_RETRIES) ")\r\n"
+        "/MIN_READ_LEN:<length>    Minimum data read len (0-" TOSTRING(FILE_BUFFER_SIZE) ", power of 2, default " TOSTRING(FILE_BUFFER_SIZE) ")\r\n"
         "/?                        Display this help\r\n$");
 }
 
@@ -2710,6 +2715,7 @@ int main(int argc, char * argv[]) {
         uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SECONDS;
         uint8_t max_request_retries = DEFAULT_MAX_NUM_REQUEST_RETRIES;
         uint8_t enabled_checksums = DEFAULT_ENABLED_CHECKSUMS;
+        uint8_t min_server_read_len = FILE_BUFFER_SIZE;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
                 // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
@@ -2799,6 +2805,17 @@ int main(int argc, char * argv[]) {
                 }
                 continue;
             }
+            if (strn_upper_cmp(argv[i] + 1, "MIN_READ_LEN:", 13) == 0) {
+                const char * endptr;
+                min_server_read_len = strto_ui16(argv[i] + 14, &endptr);
+                // The value must be a power of two and no greater than FILE_BUFFER_SIZE.
+                if (endptr == argv[i] + 14 || min_server_read_len > FILE_BUFFER_SIZE ||
+                    (min_server_read_len & (min_server_read_len - 1)) != 0) {
+                    my_print_dos_string("Error: Minimum read length must be power of 2 in range 0-64\r\n$");
+                    return EXIT_BAD_ARG;
+                }
+                continue;
+            }
             my_print_dos_string("Error: Unknown argument: $");
             my_print_string(argv[i]);
             my_print_dos_string("\r\n$");
@@ -2847,6 +2864,8 @@ int main(int argc, char * argv[]) {
         drv_info->max_request_retries = max_request_retries;
 
         drv_info->enabled_checksums = enabled_checksums;
+
+        drv_info->min_server_read_len = min_server_read_len;
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)

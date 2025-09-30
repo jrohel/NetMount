@@ -18,6 +18,7 @@ NETMOUNT INSTALL /IP:<local_ipv4_addr> [/MASK:<net_mask>] [/GW:<gateway_addr>]
 
 NETMOUNT MOUNT [/CHECKSUMS:<names>] [/MIN_RCV_TMO:<seconds>]
          [/MAX_RCV_TMO:<seconds>] [/MAX_RETRIES:<count>]
+         [/MIN_READ_LEN:<length>]
          <remote_ipv4_addr>[:<remote_udp_port>]/<remote_drive_letter>
          <local_drive_letter>
 
@@ -51,6 +52,7 @@ Arguments:
 /MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default 1)
 /MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default 5)
 /MAX_RETRIES:<count>      Maximum number of request retries (0-254, default 4)
+/MIN_READ_LEN:<length>    Minimum data read len (0-64, power of 2, default 64)
 /?                        Display this help
 ```
 
@@ -153,17 +155,25 @@ rate of just 4 KB/s when reading in 4-byte blocks. When reading byte by byte, 
 Over Wi-Fi with poor signal or over the Internet (e.g., with 20 ms latency), transfer speeds
 can fall to just a few hundred bytes per second.
 
-To address this, the NetMount client uses 64-byte buffer for read-ahead buffering. When reading files,
-it requests at least 64 bytes from the server to fill this buffer, assuming the next reads will be
-sequential and can be served directly from the buffer. Although 64 bytes is relatively small,
-this change results in up to 64x faster reads when the application reads 1 byte at a time, and
-16x faster for 4-byte blocks. Read-ahead buffering also reduces the load on the network and
-the NetMount server. Serving a single 64-byte read is much less demanding than handling 16 separate
-4-byte requests, or 64 one-byte requests.
+To address this, the NetMount client uses read-ahead buffering. By default, it uses a 64-byte buffer
+and, when reading files, requests at least 64 bytes from the server to fill this buffer - assuming
+that subsequent reads will be sequential and can be served directly from it.
+Although 64 bytes is relatively small, this change results in up to 64x faster reads when
+the application reads 1 byte at a time, and 16x faster for 4-byte blocks. Read-ahead buffering also
+reduces the load on the network and the NetMount server. Serving a single 64-byte read is much less
+demanding than handling 16 separate 4-byte requests, or 64 one-byte requests.
 
-Read-ahead buffering is only applied when the read request is smaller than 64 bytes. Larger reads
-bypass the buffer. A slowdown could occur if the application performs many small reads
-from random offsets that fall outside of the buffered data. This read-ahead buffering never
+The size of the read-ahead buffer is configurable using the `/MIN_READ_LEN:<length>` argument.
+The `<length>` value may be one of the following: `0`, `1`, `2`, `4`, `8`, `16`, `32`, or `64`.
+Setting it to `0` disables read-ahead buffering entirely.
+If the `/MIN_READ_LEN:<length>` argument is not provided, the default value of `64` is used.
+This setting is independent for each mounted drive. However, internally, the NetMount client uses
+a single shared 64-byte read-ahead buffer for all mounted drives, and the setting determines
+how many bytes from the beginning of the buffer are used by each drive.
+
+Read-ahead buffering is applied only when the read request is smaller than the configured buffer
+size. Larger reads bypass the buffer. A slowdown may occur if the application performs many small
+reads from random offsets that fall outside the buffered data. This read-ahead buffering never
 increases the number of requests - only the number of bytes in responses may be larger.
 
 Since the server-side data is not locked, there is a risk that it may be modified by another
