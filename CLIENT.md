@@ -73,7 +73,7 @@ drives than necessary wastes memory.
 
     `rtspkt.com -p 0x60`
 
-    - **-p**: Disables promiscuous mode (NetMount does not require it)
+    - **-p**: Disables promiscuous mode (NetMount does not use promiscuous mode, so it is safe to disable it)
     - **0x60**: Packet driver interrupt
 
 2. **Install NetMount client**
@@ -136,6 +136,74 @@ speed, it still ensures reliable functionality.
     `netmount install /IP:192.168.100.10 /MASK:255.255.255.0 /GW:192.168.100.1 /MTU:1420`
     `netmount mount 192.168.100.2/C G`
     `netmount mount 192.168.200.2/C H`
+
+
+## Sharing a Network Interface Between NetMount and Other Applications
+
+For each network interface card (NIC), only one packet driver can be installed in the system.
+This driver operates at the link layer (Layer 2) and provides access to the network card.
+
+The packet driver allows registering receive handlers based on the frame type.
+The NetMount client uses Ethernet types 0x0800 (IPv4 protocol) and 0x0806 (ARP protocol).
+
+Typically, a packet driver supports only one handler per specific frame type - meaning that only one
+application can receive packets of a given type. As a result, once the NetMount client registers handlers
+for these frame types, no other application can register for IPv4 or ARP on the same packet driver.
+
+To overcome this limitation, a Packet Driver Multiplexer can be used. This is a TSR (Terminate and Stay
+Resident) program that registers itself with the physical packet driver and exposes multiple virtual packet
+driver interfaces. The multiplexer receives network frames from the real driver and distributes them
+to registered virtual drivers based on the frame type. From the system's perspective, one physical NIC
+can then be accessed as several independent virtual interfaces. NetMount can use one interface while other
+applications use the others.
+
+### Example: Using the Packet Driver Multiplexer (PKTMUX v1.2b) with Two Virtual Interfaces
+
+1. **Install the Packet Driver**
+
+    Install the packet driver for your network card as usual.
+    The following example is for a Realtek RTL8139 card - replace with the appropriate driver for your hardware:
+
+    `rtspkt.com -p 0x60`
+
+    - **-p**: Disables promiscuous mode (NetMount does not use promiscuous mode, so it is safe to disable it unless another application depends on it)
+    - **0x60**: Packet driver interrupt
+
+2. **Install PKTMUX**
+
+    Load the packet multiplexer and specify the number of virtual interfaces (channels).
+    Here we create **2 channels**:
+
+    `pktmux 2`
+
+    - By default, PKTMUX attaches to the packet driver at `INT 0x60`.
+
+3. **Install Virtual Packet Drivers**
+
+    For each virtual interface (channel), load a virtual packet driver.
+    Assign a unique software interrupt number to each:
+
+    `pktdrv 63`
+
+    `pktdrv 65`
+
+    - This creates virtual drivers at `INT 0x63` and `INT 0x65` (hex).
+    - Choose unused interrupt numbers (`0x60 - 0x7F`) to avoid conflicts.
+
+4. **Install NetMount Client (on Second Virtual Interface)**
+
+    Bind NetMount client to the virtual driver on interrupt `0x65` (decimal `101`).
+    NetMount client versions up to and including 1.5.0 do not support hexadecimal values in /PKT_INT. Use the decimal value instead.
+
+    `netmount install /PKT_INT:0x65 /IP:192.168.100.10 /MASK:255.255.255.0 /GW:192.168.100.1`
+
+5. **Use the First Virtual Interface for Other Applications**
+
+    Applications can be assigned a different IP address than the NetMount client. They can also use DHCP for their configuration,
+    depending on the capabilities of the specific application.
+
+Using a Packet Driver Multiplexer and running additional network applications may degrade data transfer
+performance when accessing NetMount-mounted drives.
 
 
 ## Mounting a Shared Directories via Serial Port
