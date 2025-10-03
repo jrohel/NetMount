@@ -75,7 +75,7 @@ Arguments:
 - The physical location of the directory is irrelevant (hard disk, RAM-based, CD-ROM, network-mounted drive, ...)
 - Uses the UDP protocol.
 - Includes built-in implementations of the IP, UDP, and SLIP protocols.
-- Implements file name conversion to the DOS 8.3 format.
+- Implements file name conversion to the DOS 8.3 format, including Unicode-to-ASCII transliteration.
 - Supports POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows.
 - Can run as a non-root/unprivileged user.
 - Supports running multiple instances concurrently, each using a unique IP/port combination or
@@ -89,7 +89,7 @@ Arguments:
 ```
 ./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
-[--log-level=<LEVEL>]
+[--translit-map-path=<PATH>] [--log-level=<LEVEL>]
 <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]
 [... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]
 
@@ -100,6 +100,7 @@ Options:
   --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)
   --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device
   --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)
+  --translit-map-path=<PATH>  Unicode-to-ASCII map file (default: "netmount-u2a.map"; empty disables)
   --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)
   <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve
   attrs=<storage_method>      File attribute storage method: AUTO, IGNORE, NATIVE, EXTENDED (default: AUTO)

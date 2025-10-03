@@ -4,6 +4,7 @@
 #include "fs.hpp"
 
 #include "logger.hpp"
+#include "unicode_to_ascii.hpp"
 #include "utils.hpp"
 
 #include <errno.h>
@@ -99,7 +100,8 @@ std::pair<uint64_t, uint64_t> fs_space_info(const std::filesystem::path & path);
 std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * out_buf, unsigned int buf_size);
 
 // Converts server file name to DOS short name in FCB format
-bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names);
+bool file_name_to_83(
+    const std::filesystem::path & orig_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names);
 
 
 // Tests whether the FCB file name matches the FCB file mask.
@@ -735,7 +737,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
             auto filename = path.filename();
             get_path_dos_properties(path, &fprops, drive.get_attrs_mode());
             if (drive.get_file_name_conversion() != Drive::FileNameConversion::OFF) {
-                file_name_to_83(filename.string(), fprops.fcb_name, fcb_names);
+                file_name_to_83(filename, fprops.fcb_name, fcb_names);
                 fprops.server_name = filename;
             }
             log(LogLevel::DEBUG,
@@ -852,13 +854,19 @@ std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * ou
 }
 
 
-bool file_name_to_83(std::string_view long_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names) {
+bool file_name_to_83(
+    const std::filesystem::path & orig_name, fcb_file_name & fcb_name, std::set<fcb_file_name> & used_names) {
+#ifdef _WIN32
+    const std::string long_name = convert_windows_unicode_to_ascii(orig_name.wstring());
+#else
+    const std::string long_name = convert_utf8_to_ascii(orig_name.string());
+#endif
     const size_t dotPos = long_name.find_last_of('.');
     std::string_view base;
     std::string_view ext;
     if (dotPos != std::string::npos) {
-        base = long_name.substr(0, dotPos);
-        ext = long_name.substr(dotPos + 1);
+        base = std::string_view(long_name.begin(), long_name.begin() + dotPos);
+        ext = std::string_view(long_name.begin() + dotPos + 1, long_name.end());
     } else {
         base = long_name;
     }

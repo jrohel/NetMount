@@ -7,6 +7,7 @@
 #include "logger.hpp"
 #include "slip_udp_serial.hpp"
 #include "udp_socket.hpp"
+#include "unicode_to_ascii.hpp"
 #include "utils.hpp"
 
 #include <errno.h>
@@ -34,6 +35,7 @@ namespace {
 
 constexpr char DEFAULT_VOLUME_LABEL[] = "NETMOUNT";
 
+const std::filesystem::path TRANSLITERATION_MAP_FILE = "netmount-u2a.map";
 
 // Reply cache - contains the last replies sent to clients
 // It is used in case a client has not received reply and resends request so that we don't process
@@ -888,7 +890,7 @@ void print_help(const char * program_name) {
         stdout,
         "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
-        "[--log-level=<LEVEL>] "
+        "[--translit-map-path=<PATH>] [--log-level=<LEVEL>] "
         "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>] "
         "[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]\n\n",
         program_name);
@@ -903,6 +905,7 @@ void print_help(const char * program_name) {
         "  --slip-dev=<SERIAL_DEVICE>  Serial device used for SLIP (host network is used by default)\n"
         "  --slip-speed=<BAUD_RATE>    Baud rate of the SLIP serial device\n"
         "  --slip-rts-cts=<ENABLED>    Enable hardware flow control: 0 = OFF, 1 = ON (default: OFF)\n"
+        "  --translit-map-path=<PATH>  Unicode-to-ASCII map file (default: \"netmount-u2a.map\"; empty disables)\n"
         "  --log-level=<LEVEL>         Logging verbosity level: 0 = OFF, 7 = TRACE (default: 3)\n"
         "  <drive>=<root_path>         drive - DOS drive C-Z, root_path - path to serve\n"
         "  attrs=<storage_method>      File attribute storage method: AUTO, IGNORE" NATIVE EXTENDED
@@ -1089,6 +1092,7 @@ int main(int argc, char ** argv) {
     uint32_t slip_speed{0};
     bool slip_hw_flow_control{false};
     unsigned char cksumflag;
+    std::filesystem::path transliteration_map_path = TRANSLITERATION_MAP_FILE;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
@@ -1152,6 +1156,10 @@ int main(int argc, char ** argv) {
                 return -1;
             }
             global_log_level = static_cast<LogLevel>(log_level);
+            continue;
+        }
+        if (arg.starts_with("--translit-map-path=")) {
+            transliteration_map_path = arg.substr(20);
             continue;
         }
         if (arg[1] == '=') {
@@ -1240,17 +1248,24 @@ int main(int argc, char ** argv) {
 #endif
     signal(SIGINT, signal_handler);
 
+    bool is_file_name_conversion_active = false;
+
     // Print table with shared drives
     bool print_header = true;
     for (std::size_t i = 0; i < drives.size(); ++i) {
         const auto & drive = drives[i];
+
         if (!drive.is_shared()) {
             continue;
         }
+
         if (print_header) {
             print(stdout, "attrs mode | drive | path\n");
             print_header = false;
         }
+
+        is_file_name_conversion_active |= drive.get_file_name_conversion() != Drive::FileNameConversion::OFF;
+
         const auto attrs_mode = drive.get_attrs_mode();
         print(
             stdout,
@@ -1258,6 +1273,17 @@ int main(int argc, char ** argv) {
             attrs_mode == AttrsMode::IN_EXTENDED ? "extended" : (attrs_mode == AttrsMode::NATIVE ? "native" : "ignore"),
             'A' + i,
             drive.get_root().string());
+    }
+
+    if (is_file_name_conversion_active && !transliteration_map_path.empty()) {
+        try {
+            load_transliteration_map(transliteration_map_path);
+        } catch (const std::exception & ex) {
+            log(LogLevel::CRITICAL,
+                "Filename conversion is enabled, but the transliteration map failed to load: {}\n",
+                ex.what());
+            exit_flag = 1;
+        }
     }
 
     // main loop
