@@ -1,3 +1,46 @@
+# 1.6.0 (2025-10-12)
+
+## Features
+
+- **Support hexadecimal numbers in arguments**
+
+    NetMount still accepts numbers in decimal by default, but if a number in an argument starts
+    with `"0x"` or `"0X"`, it is now interpreted as a hexadecimal number.
+
+- **Read-ahead buffering for file reads**
+
+    By default, it uses a 64-byte buffer and, when reading files, requests at least 64 bytes
+    from the server to fill this buffer - assuming that subsequent reads will be sequential and
+    can be served directly from it. This change results in up to 64x faster reads when
+    the application reads 1 byte at a time, and 16x faster for 4-byte blocks. Read-ahead buffering
+    also reduces the load on the network and the NetMount server. Serving a single 64-byte read is
+    much less demanding than handling 16 separate 4-byte requests, or 64 one-byte requests.
+
+    The size of the read-ahead buffer is configurable using the `/MIN_READ_LEN:<length>` argument.
+    The `<length>` value may be one of the following: `0`, `1`, `2`, `4`, `8`, `16`, `32`, or `64`.
+    Setting it to `0` disables read-ahead buffering entirely.
+    If the `/MIN_READ_LEN:<length>` argument is not provided, the default value of `64` is used.
+    This setting is independent for each mounted drive. However, internally, the NetMount client uses
+    a single shared 64-byte read-ahead buffer for all mounted drives, and the setting determines
+    how many bytes from the beginning of the buffer are used by each drive.
+
+    Read-ahead buffering is applied only when the read request is smaller than the configured buffer
+    size. Larger reads bypass the buffer.
+
+## Other
+
+- **Optimize memory usage**
+
+    Release environment from memory, and do it during the INSTALL phase
+
+- **Extend validation of arguments**
+
+- **Add 8086/80286 targets to Makefile and disassembly**
+
+- **Add documentation section on sharing a network interface with other applications**
+
+----
+
 # 1.5.0 (2025-05-23)
 
 ## Features
