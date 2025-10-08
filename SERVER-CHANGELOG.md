@@ -1,3 +1,33 @@
+# 1.6.0 (2025-10-12)
+
+## Features
+
+- **Improve server file names conversion to DOS 8.3 format**
+
+    Previously, invalid characters in filenames were removed.
+
+    **The updated logic now attempts to transliterate Unicode characters to ASCII.**
+    It removes combining characters (accents, diacritics, etc.) and replaces
+    non-ASCII characters with their ASCII equivalents.
+
+    By default, the transliteration mapping table is loaded from the file
+    "netmount-u2a.map", but the path can be changed using the `--translit_map_path=<PATH>` argument.
+    Setting `<PATH>` to an empty string disables the use of the mapping table.
+
+    The mapping table is user-extensible and can be customized easily.
+    If a Unicode character is not found in the mapping table, it is replaced by an underscore '_'.
+
+    Examples:
+
+    | original name      | old conversion | new but missing map file | new conversion     |
+    |--------------------|----------------|--------------------------|--------------------|
+    |**`data.tar.gz`**   | `DATATA~1.GZ`  | `DATA_TAR.GZ`            | **`DATA_TAR.GZ`**  |
+    |**`NašePísně.doc`** | `NAEPSN~1.DOC` | `NA_EP_~1.DOC`           | **`NASEPI~1.DOC`** |
+    |**`píseň.txt`**     | `PSE~1.TXT`    | `P_SE_.TXT`              | **`PISEN.TXT`**    |
+    |**`история.txt`**   | `~1.TXT`       | `_______.TXT`            | **`ISTORIJA.TXT`** |
+
+----
+
 # 1.5.0 (2025-09-08)
 
 ## Features
