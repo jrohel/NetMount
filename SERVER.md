@@ -125,13 +125,11 @@ So, the file `LONG_N~1.TXT` (on the server `long_name1.txt`) has been deleted. B
 - Space characters ' ' are preserved except for the trailing ones (in DOS they are considered to be padding
   and not a part of the filename).
 
-- Other characters are omitted.
+- Other characters are replaced with an underscore '_'.
 
-- If any character is omitted based on the above conversion, or the name was too long, the name is modified
-  to end with `~<number>`.
+- If the resulting filename exceeds the allowed length, it is modified to end with `~<number>`.
 
-- If a name collision occurs after lower to upper case conversion, the new name is modified to end with
-  `~<number>`.
+- If a name collision occurs after the above conversion, the new name is modified to end with `~<number>`.
 
 - `<number>` is a number in the range 1-9999. It starts with 1 for a specific prefix and increases by 1.
 

@@ -817,7 +817,6 @@ std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * ou
 
     const std::size_t last_non_space_idx = in.find_last_not_of(' ');
 
-    bool shortened = false;
     unsigned int out_len = 0;
     for (std::size_t idx = 0; idx < in.length(); ++idx) {
         const char ch = in[idx];
@@ -840,7 +839,8 @@ std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * ou
             continue;
         }
 
-        shortened = true;
+        // Replace disallowed characters with '_'
+        out_buf[out_len++] = '_';
     }
 
     // pad with spaces
@@ -848,7 +848,7 @@ std::pair<unsigned int, bool> sanitize_short_name(std::string_view in, char * ou
         out_buf[--buf_size] = ' ';
     }
 
-    return {out_len, shortened};
+    return {out_len, false};
 }
 
 
