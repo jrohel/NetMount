@@ -3,10 +3,10 @@
 
 #include "../include/dos.h"
 #include "../include/drvproto.h"
-#include "exitcode.h"
+#include "../include/exitcode.h"
+#include "../include/nettypes.h"
+#include "../include/pktdrv.h"
 #include "i86.h"
-#include "nettypes.h"
-#include "pktdrv.h"
 
 #include <stdint.h>
 
