@@ -4,7 +4,7 @@
 #ifndef _FS_HPP_
 #define _FS_HPP_
 
-#include "../shared/dos.h"
+#include "../include/dos.h"
 #include "config.hpp"
 
 #include <stdint.h>

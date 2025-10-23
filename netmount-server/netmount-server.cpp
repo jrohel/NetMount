@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
-#include "../shared/dos.h"
-#include "../shared/drvproto.h"
+#include "../include/dos.h"
+#include "../include/drvproto.h"
 #include "fs.hpp"
 #include "logger.hpp"
 #include "slip_udp_serial.hpp"

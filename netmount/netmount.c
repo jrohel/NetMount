@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2024-2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
-#include "../shared/dos.h"
-#include "../shared/drvproto.h"
+#include "../include/dos.h"
+#include "../include/drvproto.h"
 #include "exitcode.h"
 #include "i86.h"
 #include "nettypes.h"

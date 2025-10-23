@@ -7,7 +7,7 @@
 # Example usage:
 #   make -f Makefile.cross
 
-HEADERS = fs.hpp udp_socket.hpp slip_udp_serial.hpp serial_port.hpp utils.hpp logger.hpp unicode_to_ascii.hpp ../shared/dos.h ../shared/drvproto.h
+HEADERS = fs.hpp udp_socket.hpp slip_udp_serial.hpp serial_port.hpp utils.hpp logger.hpp unicode_to_ascii.hpp ../include/dos.h ../include/drvproto.h
 
 # linux
 CPPFLAGS = -O2 -W -Wall -Wextra -std=c++20
