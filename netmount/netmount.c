@@ -17,23 +17,40 @@
 #define ABI_VERSION                1  // Current ABI version provided by the NetMount client
 #define MIN_COMPATIBLE_ABI_VERSION 1  // Earliest ABI version that remains compatible with 'abi_version'
 
-#define CHECKSUM_IP_HEADER      0x01
-#define CHECKSUM_NETMOUNT_PROTO 0x02
+// NetMount client parameters
+#define CHECKSUM_IP_HEADER        0x01
+#define CHECKSUM_NETMOUNT_PROTO   0x02
+#define DEFAULT_ENABLED_CHECKSUMS (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
 
-// Program parameters
-#define ENABLE_DRIVE_PROTO_CHECKSUM     1
-#define DEFAULT_MIN_RCV_TMO_SECONDS     1
-#define DEFAULT_MAX_RCV_TMO_SECONDS     5
-#define DEFAULT_MAX_NUM_REQUEST_RETRIES 4
-#define DEFAULT_ENABLED_CHECKSUMS       (CHECKSUM_IP_HEADER | CHECKSUM_NETMOUNT_PROTO)
-#define FILE_BUFFER_SIZE                64  // power of two, maximum 128
+#define MAX_PKT_INT 0x80
+#define MIN_PKT_INT 0x60
 
-#define MAX_INTERFACE_MTU 1500
+#define MAX_MTU     1500
+#define MIN_MTU     560
+#define DEFAULT_MTU 1500
+
+#define MAX_MIN_RCV_TMO_SEC     56
+#define MIN_MIN_RCV_TMO_SEC     1
+#define DEFAULT_MIN_RCV_TMO_SEC 1
+
+#define MAX_MAX_RCV_TMO_SEC     56
+#define MIN_MAX_RCV_TMO_SEC     1
+#define DEFAULT_MAX_RCV_TMO_SEC 5
+
+#define MAX_MAX_RETRIES     254
+#define MIN_MAX_RETRIES     0
+#define DEFAULT_MAX_RETRIES 4
+
+// Must be power of 2, maximum 128
+#define MAX_MIN_READ_LEN     64
+#define MIN_MIN_READ_LEN     0
+#define DEFAULT_MIN_READ_LEN 64
+
+
+#define FILE_BUFFER_SIZE MAX_MIN_READ_LEN  // power of two, maximum 128
 
 // 14 = sizeof(mac_hdr); 4 = FCS (validated by hardware/driver, usually not passed to user, but just in case)
-#define MAX_FRAMESIZE 14 + MAX_INTERFACE_MTU + 4
-
-#define DEFAULT_INTERFACE_MTU 1500
+#define MAX_FRAMESIZE 14 + MAX_MTU + 4
 
 #define ARP_REQUEST_RCV_TMO_SEC 1
 #define ARP_REQUEST_MAX_RETRIES 4
@@ -2455,10 +2472,10 @@ static void print_help(void) {
         "/IP:<local_ipv4_addr>     Sets local IP address\r\n"
         "/PORT:<local_udp_port>    Sets local UDP port. " TOSTRING(DRIVE_PROTO_UDP_PORT) " by default\r\n"
         "/PKT_INT:<packet_drv_int> Sets interrupt of used packet driver.\r\n"
-        "                          First found in range 0x60 - 0x80 by default.\r\n"
+        "                          First found in range " TOSTRING(MIN_PKT_INT) " - " TOSTRING(MAX_PKT_INT) " by default.\r\n"
         "/MASK:<net_mask>          Sets network mask\r\n"
         "/GW:<gateway_addr>        Sets gateway address\r\n"
-        "/MTU:<size>               Interface MTU (560-" TOSTRING(MAX_INTERFACE_MTU) ", default " TOSTRING(DEFAULT_INTERFACE_MTU) ")\r\n"
+        "/MTU:<size>               Interface MTU (" TOSTRING(MIN_MTU) "-" TOSTRING(MAX_MTU) ", default " TOSTRING(DEFAULT_MTU) ")\r\n"
         "/NO_ARP_REQUESTS          Don't send ARP requests. Replying is allowed\r\n"
         "<local_drive_letter>      Specifies local drive to mount/unmount (e.g. H)\r\n"
         "<remote_drive_letter>     Specifies remote drive to mount/unmount (e.g. H)\r\n"
@@ -2466,10 +2483,10 @@ static void print_help(void) {
         "<remote_ipv4_addr>        Specifies IP address of remote server\r\n"
         "<remote_udp_port>         Specifies remote UDP port. " TOSTRING(DRIVE_PROTO_UDP_PORT) " by default\r\n"
         "/CHECKSUMS:<names>        Enabled checksums (IP_HEADER,NETMOUNT; both default)\r\n"
-        "/MIN_RCV_TMO:<seconds>    Minimum response timeout (1-56, default " TOSTRING(DEFAULT_MIN_RCV_TMO_SECONDS) ")\r\n"
-        "/MAX_RCV_TMO:<seconds>    Maximum response timeout (1-56, default " TOSTRING(DEFAULT_MAX_RCV_TMO_SECONDS) ")\r\n"
-        "/MAX_RETRIES:<count>      Maximum number of request retries (0-254, default " TOSTRING(DEFAULT_MAX_NUM_REQUEST_RETRIES) ")\r\n"
-        "/MIN_READ_LEN:<length>    Minimum data read len (0-" TOSTRING(FILE_BUFFER_SIZE) ", power of 2, default " TOSTRING(FILE_BUFFER_SIZE) ")\r\n"
+        "/MIN_RCV_TMO:<seconds>    Minimum response timeout (" TOSTRING(MIN_MIN_RCV_TMO_SEC) "-" TOSTRING(MAX_MIN_RCV_TMO_SEC) ", default " TOSTRING(DEFAULT_MIN_RCV_TMO_SEC) ")\r\n"
+        "/MAX_RCV_TMO:<seconds>    Maximum response timeout (" TOSTRING(MIN_MAX_RCV_TMO_SEC) "-" TOSTRING(MAX_MAX_RCV_TMO_SEC) ", default " TOSTRING(DEFAULT_MAX_RCV_TMO_SEC) ")\r\n"
+        "/MAX_RETRIES:<count>      Maximum number of request retries (" TOSTRING(MIN_MAX_RETRIES) "-" TOSTRING(MAX_MAX_RETRIES) ", default " TOSTRING(DEFAULT_MAX_RETRIES) ")\r\n"
+        "/MIN_READ_LEN:<length>    Minimum data read len (" TOSTRING(MIN_MIN_READ_LEN) "-" TOSTRING(MAX_MIN_READ_LEN) ", power of 2, default " TOSTRING(DEFAULT_MIN_READ_LEN) ")\r\n"
         "/?                        Display this help\r\n$");
 }
 
@@ -2582,7 +2599,7 @@ int main(int argc, char * argv[]) {
         getptr_shared_data()->local_port = DRIVE_PROTO_UDP_PORT;
         getptr_shared_data()->net_mask.value = 0;
         getptr_shared_data()->requested_pktdrv_int = 0;
-        getptr_shared_data()->interface_mtu = DEFAULT_INTERFACE_MTU;
+        getptr_shared_data()->interface_mtu = DEFAULT_MTU;
         getptr_shared_data()->disable_sending_arp_request = 0;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
@@ -2635,9 +2652,11 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "PKT_INT:", 8) == 0) {
                 const char * endptr;
                 getptr_shared_data()->requested_pktdrv_int = strto_ui16(argv[i] + 9, &endptr);
-                if (getptr_shared_data()->requested_pktdrv_int < 0x60 ||
-                    getptr_shared_data()->requested_pktdrv_int > 0x80) {
-                    my_print_dos_string("Error: Packet driver interrupt must be in range 0x60-0x80\r\n$");
+                if (getptr_shared_data()->requested_pktdrv_int < MIN_PKT_INT ||
+                    getptr_shared_data()->requested_pktdrv_int > MAX_PKT_INT) {
+                    my_print_dos_string(
+                        "Error: Packet driver interrupt must be in range " TOSTRING(MIN_PKT_INT) "-" TOSTRING(
+                            MAX_PKT_INT) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
@@ -2645,9 +2664,9 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "MTU:", 4) == 0) {
                 const char * endptr;
                 getptr_shared_data()->interface_mtu = strto_ui16(argv[i] + 5, &endptr);
-                if (getptr_shared_data()->interface_mtu > 1500 || getptr_shared_data()->interface_mtu < 560) {
+                if (getptr_shared_data()->interface_mtu > MAX_MTU || getptr_shared_data()->interface_mtu < MIN_MTU) {
                     my_print_dos_string(
-                        "Error: Interface MTU must be in the range 560-" TOSTRING(MAX_INTERFACE_MTU) "\r\n$");
+                        "Error: Interface MTU must be in the range " TOSTRING(MIN_MTU) "-" TOSTRING(MAX_MTU) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
@@ -2685,8 +2704,8 @@ int main(int argc, char * argv[]) {
         // init the packet driver interface
         getptr_shared_data()->used_pktdrv_int = 0;
         if (getptr_shared_data()->requested_pktdrv_int == 0) {
-            // detect first packet driver within int 0x60..0x80
-            for (int i = 0x60; i <= 0x80; ++i) {
+            // detect first packet driver within int MIN_PKT_INT..MAX_PKT_INT
+            for (int i = MIN_PKT_INT; i <= MAX_PKT_INT; ++i) {
                 if (pktdrv_init(i) == 0) {
                     break;
                 }
@@ -2808,11 +2827,11 @@ int main(int argc, char * argv[]) {
         uint16_t remote_port = DRIVE_PROTO_UDP_PORT;
         uint8_t remote_drive_no;
         uint8_t drive_no;
-        uint16_t min_rcv_tmo_sec = DEFAULT_MIN_RCV_TMO_SECONDS;
-        uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SECONDS;
-        uint8_t max_request_retries = DEFAULT_MAX_NUM_REQUEST_RETRIES;
+        uint16_t min_rcv_tmo_sec = DEFAULT_MIN_RCV_TMO_SEC;
+        uint16_t max_rcv_tmo_sec = DEFAULT_MAX_RCV_TMO_SEC;
+        uint8_t max_request_retries = DEFAULT_MAX_RETRIES;
         uint8_t enabled_checksums = DEFAULT_ENABLED_CHECKSUMS;
-        uint8_t min_server_read_len = FILE_BUFFER_SIZE;
+        uint8_t min_server_read_len = DEFAULT_MIN_READ_LEN;
         for (int i = 2; i < argc; ++i) {
             if (argv[i][0] != '/') {
                 // NetMount mount <ipv4_addr>[:port]/<remote_drive> <local_drive>
@@ -2878,8 +2897,10 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "MIN_RCV_TMO:", 12) == 0) {
                 const char * endptr;
                 min_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
-                if (min_rcv_tmo_sec < 1 || min_rcv_tmo_sec > 56) {
-                    my_print_dos_string("Error: Minimum response timeout must be in range 1-56\r\n$");
+                if (min_rcv_tmo_sec < MIN_MIN_RCV_TMO_SEC || min_rcv_tmo_sec > MAX_MIN_RCV_TMO_SEC) {
+                    my_print_dos_string(
+                        "Error: Minimum response timeout must be in range " TOSTRING(MIN_MIN_RCV_TMO_SEC) "-" TOSTRING(
+                            MAX_MIN_RCV_TMO_SEC) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
@@ -2887,28 +2908,36 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "MAX_RCV_TMO:", 12) == 0) {
                 const char * endptr;
                 max_rcv_tmo_sec = strto_ui16(argv[i] + 13, &endptr);
-                if (max_rcv_tmo_sec < 1 || max_rcv_tmo_sec > 56) {
-                    my_print_dos_string("Error: Maximum response timeout must be in range 1-56\r\n$");
+                if (max_rcv_tmo_sec < MIN_MAX_RCV_TMO_SEC || max_rcv_tmo_sec > MAX_MAX_RCV_TMO_SEC) {
+                    my_print_dos_string(
+                        "Error: Maximum response timeout must be in range " TOSTRING(MIN_MAX_RCV_TMO_SEC) "-" TOSTRING(
+                            MAX_MAX_RCV_TMO_SEC) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MAX_RETRIES:", 12) == 0) {
                 const char * endptr;
-                max_request_retries = strto_ui16(argv[i] + 13, &endptr);
-                if (endptr == argv[i] + 13 || max_request_retries > 254) {
-                    my_print_dos_string("Error: Maximum request retries must be in range 0-254\r\n$");
+                const int16_t tmp_max_request_retries = strto_ui16(argv[i] + 13, &endptr);
+                if (endptr == argv[i] + 13 || tmp_max_request_retries > MAX_MAX_RETRIES ||
+                    tmp_max_request_retries < MIN_MAX_RETRIES) {
+                    my_print_dos_string(
+                        "Error: Maximum request retries must be in range " TOSTRING(MIN_MAX_RETRIES) "-" TOSTRING(
+                            MAX_MAX_RETRIES) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
+                max_request_retries = tmp_max_request_retries;
                 continue;
             }
             if (strn_upper_cmp(argv[i] + 1, "MIN_READ_LEN:", 13) == 0) {
                 const char * endptr;
                 min_server_read_len = strto_ui16(argv[i] + 14, &endptr);
                 // The value must be a power of two and no greater than FILE_BUFFER_SIZE.
-                if (endptr == argv[i] + 14 || min_server_read_len > FILE_BUFFER_SIZE ||
+                if (endptr == argv[i] + 14 || min_server_read_len > MAX_MIN_READ_LEN ||
                     (min_server_read_len & (min_server_read_len - 1)) != 0) {
-                    my_print_dos_string("Error: Minimum read length must be power of 2 in range 0-64\r\n$");
+                    my_print_dos_string(
+                        "Error: Minimum read length must be power of 2 in range " TOSTRING(
+                            MIN_MIN_READ_LEN) "-" TOSTRING(MAX_MIN_READ_LEN) "\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
