@@ -12,8 +12,10 @@
 
 #pragma pack(1)
 
-#define PROGRAM_VERSION "1.6.0"
+#define NETMOUNT_VERSION "1.6.0"
 
+#define ABI_VERSION                1  // Current ABI version provided by the NetMount client
+#define MIN_COMPATIBLE_ABI_VERSION 1  // Earliest ABI version that remains compatible with 'abi_version'
 
 #define CHECKSUM_IP_HEADER      0x01
 #define CHECKSUM_NETMOUNT_PROTO 0x02
@@ -59,8 +61,13 @@ typedef void(__interrupt * interrupt_handler)(void);
 
 #define MAX_DRIVES_COUNT 26
 struct shared_data {
-    uint8_t ldrv[MAX_DRIVES_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
-                                     // must be first in structure, used in assembler
+    uint16_t abi_version;                 // Current ABI version provided by the NetMount client
+    uint16_t min_compatible_abi_version;  // Earliest ABI version that remains compatible with 'abi_version'
+                                          // 'abi_version' preserves all fields and offsets from this minimum version
+                                          // New fields, are appended at the end
+    char netmount_version[8];             // Version of the netmount program (null-terminated string)
+    uint8_t drive_map[MAX_DRIVES_COUNT];  // local to remote drives mappings (0=A, 1=B, 2=C, ...);
+    // NOTE: If the struct position changes, DRIVE_MAP_OFFSET must be updated, as it is used in assembly code.
     struct drive_info {
         uint8_t remote_ip_idx;  // index of server ip address in ip_mac_map table
         uint16_t remote_port;
@@ -99,9 +106,17 @@ struct shared_data {
     interrupt_handler pktdrv_INT_handler;
 };
 
-#define SHARED_DATA_SIZE 319  // It is sizeof(struct shared_data). Must be adjusted if structure size is changed!
-// something like static_assert, error during compilation if SHARED_DATA_SIZE != sizeof(struct shared_data)
+// Must match sizeof(struct shared_data). Update this value if the structure size changes.
+#define SHARED_DATA_SIZE 331
+// Compile-time check (similar to static_assert):
+// triggers a compiler error if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
+
+// Must match offsetof(struct shared_data, drive_map). Update this value if the field position changes.
+#define DRIVE_MAP_OFFSET 12
+// Compile-time check (similar to static_assert):
+// triggers a compiler error if DRIVE_MAP_OFFSET != offsetof(struct shared_data, drive_map)
+typedef char st_assert_DRIVE_MAP_OFFSET[DRIVE_MAP_OFFSET == offsetof(struct shared_data, drive_map) ? 1 : -1];
 
 struct file_buffer {
     uint32_t timestamp;
@@ -717,7 +732,7 @@ static uint16_t send_request(
     }
 
     // resolve remote drive - no need to validate it, it has been validated already by inthandler()
-    const uint8_t drive = getptr_shared_data()->ldrv[local_drive];
+    const uint8_t drive = getptr_shared_data()->drive_map[local_drive];
 
     struct ether_frame * const frame = getptr_global_send_buff();
 
@@ -1786,7 +1801,7 @@ static void __declspec(naked) int2F_redirector(void) {
         jge invalid_drive_no
         push bx
         xor bh, bh
-        lea bx, [shared_data + bx]
+        lea bx, [shared_data + DRIVE_MAP_OFFSET + bx]
         cmp byte ptr [cs:bx], 0xFF
         pop bx
         je invalid_drive_no
@@ -2399,7 +2414,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     }
     cds->flags = 0;
 
-    shared_data_ptr->ldrv[drive_no] = 0xFF;
+    shared_data_ptr->drive_map[drive_no] = 0xFF;
     shared_data_ptr->drives[drive_no].remote_ip_idx = 0xFF;
     return 0;
 }
@@ -2409,7 +2424,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
 
 static void print_help(void) {
     my_print_dos_string(
-        "NetMount " PROGRAM_VERSION
+        "NetMount " NETMOUNT_VERSION
         ", Copyright 2024-2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
         "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
         "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n"
@@ -2503,7 +2518,7 @@ int main(int argc, char * argv[]) {
         }
 
         for (int drive_no = 0; drive_no < MAX_DRIVES_COUNT; ++drive_no) {
-            if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
+            if (shared_data_ptr->drive_map[drive_no] != 0xFF) {
                 my_print_dos_string("NetMount cannot be removed: mounted drives detected\r\n$");
                 return EXIT_DRIVE_MOUNTED;
             }
@@ -2740,8 +2755,8 @@ int main(int argc, char * argv[]) {
         }
 
         // set all drive mappings as 'unused'
-        for (int i = 0; i < sizeof(getptr_shared_data()->ldrv); ++i)
-            getptr_shared_data()->ldrv[i] = 0xFF;
+        for (int i = 0; i < sizeof(getptr_shared_data()->drive_map); ++i)
+            getptr_shared_data()->drive_map[i] = 0xFF;
 
         *getptr_global_sda_ptr() = get_sda();
 
@@ -2755,6 +2770,14 @@ int main(int argc, char * argv[]) {
             my_print_string(buf);
             my_print_dos_string("\r\n$");
         }
+
+        // Stores version information in shared data for use by external programs.
+        getptr_shared_data()->abi_version = ABI_VERSION;
+        getptr_shared_data()->min_compatible_abi_version = MIN_COMPATIBLE_ABI_VERSION;
+        my_memcpy_ff(
+            getptr_shared_data()->netmount_version,
+            NETMOUNT_VERSION,
+            min_u16(sizeof(NETMOUNT_VERSION) - 1, sizeof(getptr_shared_data()->netmount_version) - 1));
 
         // This data is saved to a shared area and is used by UNINSTALL.
         getptr_shared_data()->psp_segment = get_current_psp_address_segment();
@@ -2928,7 +2951,7 @@ int main(int argc, char * argv[]) {
 
         drv_info->remote_ip_idx = remote_ip_idx;
         drv_info->remote_port = remote_port;
-        shared_data_ptr->ldrv[drive_no] = remote_drive_no;
+        shared_data_ptr->drive_map[drive_no] = remote_drive_no;
 
         // Convert timeouts to 18.2 Hz ticks (2 least significant bits ignored). Uses only integer operations.
         drv_info->min_rcv_tmo_18_2_ticks_shr_2 = ((min_rcv_tmo_sec * 182) / 10) >> 2;
@@ -2970,7 +2993,7 @@ int main(int argc, char * argv[]) {
 
         if (strn_upper_cmp(argv[2], "/ALL", 5) == 0) {
             for (int drive_no = 0; drive_no < MAX_DRIVES_COUNT; ++drive_no) {
-                if (shared_data_ptr->ldrv[drive_no] != 0xFF) {
+                if (shared_data_ptr->drive_map[drive_no] != 0xFF) {
                     retval |= umount(shared_data_ptr, drive_no);
                 }
             }
@@ -2981,7 +3004,7 @@ int main(int argc, char * argv[]) {
                 my_print_dos_string("Bad local drive letter\r\n$");
                 return EXIT_BAD_DRIVE_LETTER;
             }
-            if (shared_data_ptr->ldrv[drive_no] == 0xFF) {
+            if (shared_data_ptr->drive_map[drive_no] == 0xFF) {
                 my_print_dos_string("Drive is not mounted by NetMount\r\n$");
                 return EXIT_DRIVE_NOT_MOUNTED;
             }
