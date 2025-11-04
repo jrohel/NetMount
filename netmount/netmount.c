@@ -1937,6 +1937,50 @@ static union ipv4_addr parse_ipv4_addr(const char * restrict str, int * error, c
 }
 
 
+static void uint16_to_str(uint16_t num, char * buf, uint8_t buf_size, uint8_t base, char fill) {
+    int i = buf_size;
+    buf[--i] = '\0';
+    while (i > 0 && num > 0) {
+        const int tmp = num / base;
+        const int remain = num - (tmp * base);
+        buf[--i] = remain <= 9 ? remain + '0' : remain - 10 + 'A';
+        num = tmp;
+    }
+    while (i > 0) {
+        buf[--i] = fill;
+    }
+}
+
+
+static void my_print_char(char character);
+#pragma aux my_print_char = \
+    "mov ah, 0x02"          \
+    "int 0x21" parm[dx] modify exact[ah]
+
+
+// Prints C string - zero terminated
+static void my_print_string(const char * text) {
+    while (*text != '\0') {
+        my_print_char(*text);
+        ++text;
+    }
+}
+
+
+// Prints DOS string - must be terminated by '$' character
+#pragma aux my_print_dos_string parm[dx] modify exact[ah]
+static void __declspec(naked) my_print_dos_string(const char * dos_string) {
+    // suppress Open Watcom warning: "Parameter has been defined, but not referenced"
+    dos_string;
+
+    __asm {
+        mov ah, 0x09
+        int 0x21
+        ret
+    }
+}
+
+
 _Packed struct install_info {
     uint8_t installed;     // is installed
     uint8_t multiplex_id;  // my multiplex_id; if i am not installed multiplex_id free to install
@@ -2212,8 +2256,9 @@ static uint8_t pktdrv_release_type(uint16_t type_handle);
 
 
 // get my own MAC addr. target MUST point to a space of at least 6 chars
-#pragma aux pktdrv_getaddr parm[di][bx] modify exact[ax bx cx dx si di bp es]
-static void __declspec(naked) pktdrv_getaddr(struct mac_addr * dst, uint16_t pkt_handle) {
+// returns actual number ob bytes copied to output buffer or negated error code
+#pragma aux pktdrv_getaddr parm[di][bx] modify exact[ax bx cx dx si di bp es] value[cx]
+static int16_t __declspec(naked) pktdrv_getaddr(struct mac_addr * dst, uint16_t pkt_handle) {
     // suppress Open Watcom warning: "Parameter has been defined, but not referenced"
     dst;
     pkt_handle;
@@ -2237,6 +2282,14 @@ static void __declspec(naked) pktdrv_getaddr(struct mac_addr * dst, uint16_t pkt
 
         pop ds
 
+        jc error  // if carry, errorcode returned in DH
+
+        ret
+
+    error:
+        xor cx, cx
+        mov cl, dh
+        neg cx
         ret
     }
     // clang-format on
@@ -2253,14 +2306,19 @@ static uint8_t pktdrv_init(uint8_t pktdrv_int_num) {
     pktdrvfunc += 3;  // skip three bytes of executable code
     for (unsigned int i = 0; i < sizeof(PKTDRV_SIGNATURE); ++i) {
         if (PKTDRV_SIGNATURE[i] != pktdrvfunc[i]) {
+            // Packet driver signature not found
             return -1;
         }
     }
 
-    // fetch the vector of the pktdrv interrupt and save it for later
     *getptr_global_pktdrv_INT_handler() = pktdrv_pktcall;
 
+    // String representation of pktdrv_int_num for error messages
+    char str_pktdrv_int_num[3];
+    uint16_to_str(pktdrv_int_num, str_pktdrv_int_num, sizeof(str_pktdrv_int_num), 16, '0');
+
     uint8_t error_code;
+
     const uint16_t ether_type_arp = swap_word(ETHER_TYPE_ARP);
     error_code = pktdrv_register_type(&ether_type_arp, &pktdrv_recv, &getptr_shared_data()->arp_pkthandle);
     if (error_code == 0) {
@@ -2270,10 +2328,57 @@ static uint8_t pktdrv_init(uint8_t pktdrv_int_num) {
             pktdrv_release_type(getptr_shared_data()->arp_pkthandle);
         }
     }
-
-    if (error_code == 0) {
-        getptr_shared_data()->used_pktdrv_int = pktdrv_int_num;
+    if (error_code != 0) {
+        my_print_dos_string("Packet driver at interrupt 0x$");
+        my_print_string(str_pktdrv_int_num);
+        my_print_dos_string(" failed to register handle for access type\r\n$");
+        return error_code;
     }
+
+    struct mac_addr * const addr = &getptr_shared_data()->local_mac_addr;
+    const int16_t ret = pktdrv_getaddr(addr, getptr_shared_data()->ipv4_pkthandle);
+    if (ret == sizeof(*addr)) {
+        int all_zeros = 1;
+        int all_FF = 1;
+        for (int i = 0; i < sizeof(*addr); ++i) {
+            if (addr->bytes[i] != 0) {
+                all_zeros = 0;
+            }
+            if (addr->bytes[i] != 0xFF) {
+                all_FF = 0;
+            }
+        }
+
+        if (!all_zeros && !all_FF) {
+            getptr_shared_data()->used_pktdrv_int = pktdrv_int_num;
+            return 0;
+        }
+
+        my_print_dos_string("Packet driver at interrupt 0x$");
+        my_print_string(str_pktdrv_int_num);
+        my_print_dos_string(" returned an incorrect local MAC address: $");
+        if (all_zeros) {
+            my_print_dos_string("00:00:00:00:00:00\r\n$");
+        } else {
+            my_print_dos_string("FF:FF:FF:FF:FF:FF\r\n$");
+        }
+        error_code = PKTDRV_ERROR_BAD_ADDRESS;
+    } else {
+        if (ret >= 0) {
+            my_print_dos_string("Packet driver at interrupt 0x$");
+            my_print_string(str_pktdrv_int_num);
+            my_print_dos_string(" returned an incorrect local MAC address length\r\n$");
+            error_code = PKTDRV_ERROR_BAD_ADDRESS;
+        } else {
+            my_print_dos_string("Getting local MAC address for packet driver at interrupt 0x$");
+            my_print_string(str_pktdrv_int_num);
+            my_print_dos_string(" returned an error\r\n$");
+            error_code = -ret;
+        }
+    }
+
+    pktdrv_release_type(getptr_shared_data()->ipv4_pkthandle);
+    pktdrv_release_type(getptr_shared_data()->arp_pkthandle);
 
     return error_code;
 }
@@ -2284,50 +2389,6 @@ static struct shared_data __far * get_installed_shared_data_ptr(uint8_t multiple
     "mov al, 1"                             \
     "mov bx, 1"                             \
     "int 0x2F" parm[ah] modify exact[ax bx cx] value[cx bx]
-
-
-static void uint16_to_str(uint16_t num, char * buf, uint8_t buf_size, uint8_t base, char fill) {
-    int i = buf_size;
-    buf[--i] = '\0';
-    while (i > 0 && num > 0) {
-        const int tmp = num / base;
-        const int remain = num - (tmp * base);
-        buf[--i] = remain <= 9 ? remain + '0' : remain - 10 + 'A';
-        num = tmp;
-    }
-    while (i > 0) {
-        buf[--i] = fill;
-    }
-}
-
-
-static void my_print_char(char character);
-#pragma aux my_print_char = \
-    "mov ah, 0x02"          \
-    "int 0x21" parm[dx] modify exact[ah]
-
-
-// Prints C string - zero terminated
-static void my_print_string(const char * text) {
-    while (*text != '\0') {
-        my_print_char(*text);
-        ++text;
-    }
-}
-
-
-// Prints DOS string - must be terminated by '$' character
-#pragma aux my_print_dos_string parm[dx] modify exact[ah]
-static void __declspec(naked) my_print_dos_string(const char * dos_string) {
-    // suppress Open Watcom warning: "Parameter has been defined, but not referenced"
-    dos_string;
-
-    __asm {
-        mov ah, 0x09
-        int 0x21
-        ret
-    }
-}
 
 
 static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) {
@@ -2614,34 +2675,42 @@ int main(int argc, char * argv[]) {
                     break;
                 }
             }
+            if (getptr_shared_data()->used_pktdrv_int == 0) {
+                my_print_dos_string("Error: Usable packet driver not found\r\n$");
+                return EXIT_PKTDRV_INIT_FAILED;
+            }
+
         } else {
             // use the pktdrvr interrupt passed through command line
             pktdrv_init(getptr_shared_data()->requested_pktdrv_int);
-        }
-        // has it succeeded?
-        if (getptr_shared_data()->used_pktdrv_int == 0) {
-            my_print_dos_string("Packet driver initialization failed.\r\n$");
-            return EXIT_PKTDRV_INIT_FAILED;
-        }
-        my_print_dos_string("Use packet driver with interrupt number 0x$");
-        char num_int[3];
-        uint16_to_str(getptr_shared_data()->used_pktdrv_int, num_int, sizeof(num_int), 16, '0');
-        my_print_string(num_int);
-        my_print_dos_string("\r\n$");
-
-        pktdrv_getaddr(&getptr_shared_data()->local_mac_addr, getptr_shared_data()->ipv4_pkthandle);
-        my_print_dos_string("Detected local MAC address $");
-        int first = 1;
-        for (int i = 0; i < 6; ++i) {
-            if (!first) {
-                my_print_char(':');
+            if (getptr_shared_data()->used_pktdrv_int == 0) {
+                my_print_dos_string("Error: Packet driver initialization failed\r\n$");
+                return EXIT_PKTDRV_INIT_FAILED;
             }
-            char buf[3];
-            uint16_to_str(getptr_shared_data()->local_mac_addr.bytes[i], buf, sizeof(buf), 16, '0');
-            my_print_string(buf);
-            first = 0;
         }
-        my_print_dos_string("\r\n$");
+
+        {
+            my_print_dos_string("Using the packet driver on interrupt 0x$");
+            char num_int[3];
+            uint16_to_str(getptr_shared_data()->used_pktdrv_int, num_int, sizeof(num_int), 16, '0');
+            my_print_string(num_int);
+            my_print_dos_string("\r\n$");
+        }
+
+        {
+            my_print_dos_string("Detected local MAC address $");
+            int first = 1;
+            for (int i = 0; i < 6; ++i) {
+                if (!first) {
+                    my_print_char(':');
+                }
+                char buf[3];
+                uint16_to_str(getptr_shared_data()->local_mac_addr.bytes[i], buf, sizeof(buf), 16, '0');
+                my_print_string(buf);
+                first = 0;
+            }
+            my_print_dos_string("\r\n$");
+        }
 
         {
             struct ether_frame * const frame = getptr_global_send_buff();
