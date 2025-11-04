@@ -2267,7 +2267,7 @@ static uint8_t pktdrv_init(uint8_t pktdrv_int_num) {
         const uint16_t ether_type_ipv4 = swap_word(ETHER_TYPE_IPV4);
         error_code = pktdrv_register_type(&ether_type_ipv4, &pktdrv_recv, &getptr_shared_data()->ipv4_pkthandle);
         if (error_code != 0) {
-            pktdrv_release_type(ether_type_arp);
+            pktdrv_release_type(getptr_shared_data()->arp_pkthandle);
         }
     }
 
