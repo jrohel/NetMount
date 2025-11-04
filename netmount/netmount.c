@@ -2603,6 +2603,8 @@ int main(int argc, char * argv[]) {
             }
         }
 
+        *getptr_global_recv_data_len() = 1;  // Blocking frame reception by marking the receive buffer as full
+
         // init the packet driver interface
         getptr_shared_data()->used_pktdrv_int = 0;
         if (getptr_shared_data()->requested_pktdrv_int == 0) {
@@ -2695,6 +2697,8 @@ int main(int argc, char * argv[]) {
         struct psp __far * psp_ptr = MK_FP(getptr_shared_data()->psp_segment, 0);
         free_memory(psp_ptr->env_segment);
         psp_ptr->env_segment = 0;  // The memory has been released; let's not reference it anymore
+
+        *getptr_global_recv_data_len() = 0;  // Unblocking frame reception by marking the receive buffer as empty
 
         terminate_remain_resident(EXIT_OK, ((unsigned)get_offset(resident_part_end_mark) + PROGRAM_OFFSET + 15) >> 4);
     }
