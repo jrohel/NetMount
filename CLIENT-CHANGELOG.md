@@ -1,3 +1,56 @@
+# 1.7.0 (2025-11-19)
+
+## Fixes
+
+- **pktdrv_init: Fix releasing packet driver handle for ARP frames**
+
+    There was a bug in the argument: the type of ARP frame was passed
+    instead of the handle. The code is executed only in the event of
+    a packet driver initialization failure, and only when the handler for
+    ARP frames was successfully registered but the registration of the IPv4
+    handler subsequently failed. This scenario normally does not occur.
+
+## Other
+
+- **Remove redundant GPL-2.0 license file**
+
+- **Block reception of frames until netmount is fully initialized**
+
+- **Add checks when retrieving local MAC address from packet driver**
+
+- **Add NetMount client and ABI version info to shared data**
+
+    Prepares the shared data structure for use by external programs
+    that will interact with the NetMount client.
+
+- **Restrict packet driver interrupt range to 0x60–0x80**
+
+    Previously, the valid range was 0x60–0xFF. The upper limit was reduced
+    to 0x80 to match the range of software interrupts used by DOS packet
+    drivers (0x60–0x80).
+
+- **Define and use new/renamed configuration macros**
+
+- **Check installed NetMount version for compatibility**
+
+- **Move shared_data struct and parameter macros to shdata.h**
+
+    Moved the definition of `struct shared_data` and the NetMount client
+    parameter macros from netmount.c to shdata.h.
+
+    This allows other programs (e.g. the upcoming NetMount management tool)
+    to access shared_data and related configuration limits (min/max/default)
+    without duplicating definitions.
+
+- **Move additional header files to "shared" directory**
+
+    Moved shdata.h, exitcode.h, nettypes.h, and pktdrv.h into the existing
+    "shared" directory, which already contains headers shared with the
+    NetMount server. This makes these headers available to other programs
+    in the future (e.g., the upcoming NetMount management tool).
+
+----
+
 # 1.6.0 (2025-10-12)
 
 ## Features
