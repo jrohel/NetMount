@@ -3,11 +3,11 @@
 
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
-#include "exitcode.h"
+#include "../shared/exitcode.h"
+#include "../shared/nettypes.h"
+#include "../shared/pktdrv.h"
+#include "../shared/shdata.h"
 #include "i86.h"
-#include "nettypes.h"
-#include "pktdrv.h"
-#include "shdata.h"
 
 #include <stdint.h>
 
