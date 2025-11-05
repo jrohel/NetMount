@@ -2635,8 +2635,9 @@ int main(int argc, char * argv[]) {
             if (strn_upper_cmp(argv[i] + 1, "PKT_INT:", 8) == 0) {
                 const char * endptr;
                 getptr_shared_data()->requested_pktdrv_int = strto_ui16(argv[i] + 9, &endptr);
-                if (getptr_shared_data()->requested_pktdrv_int < 0x60) {
-                    my_print_dos_string("Error: Packet driver interrupt must be in range 0x60-0xFF\r\n$");
+                if (getptr_shared_data()->requested_pktdrv_int < 0x60 ||
+                    getptr_shared_data()->requested_pktdrv_int > 0x80) {
+                    my_print_dos_string("Error: Packet driver interrupt must be in range 0x60-0x80\r\n$");
                     return EXIT_BAD_ARG;
                 }
                 continue;
