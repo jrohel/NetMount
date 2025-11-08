@@ -1999,6 +1999,14 @@ static void my_print_string(const char * text) {
 }
 
 
+static void my_print_string_f(const char __far * text) {
+    while (*text != '\0') {
+        my_print_char(*text);
+        ++text;
+    }
+}
+
+
 // Prints DOS string - must be terminated by '$' character
 #pragma aux my_print_dos_string parm[dx] modify exact[ah]
 static void __declspec(naked) my_print_dos_string(const char * dos_string) {
@@ -2423,6 +2431,36 @@ static struct shared_data __far * get_installed_shared_data_ptr(uint8_t multiple
     "int 0x2F" parm[ah] modify exact[ax bx cx] value[cx bx]
 
 
+#define STRINGIFY(x) #x
+#define TOSTRING(x)  STRINGIFY(x)
+
+
+static int check_netmount_compatibility(struct shared_data const __far * shared_data_ptr) {
+    if (shared_data_ptr->abi_version != ABI_VERSION) {
+        my_print_dos_string("Error: Incompatible NetMount client installed\r\nInstalled \"$");
+        my_print_string_f(shared_data_ptr->netmount_version);
+        my_print_dos_string("\" with ABI version $");
+        char buf[6];
+        uint16_to_str(shared_data_ptr->abi_version, buf, sizeof(buf), 10, ' ');
+        my_print_string(buf);
+        my_print_dos_string(", expected \"" NETMOUNT_VERSION "\" with ABI version " TOSTRING(ABI_VERSION) "\r\n$");
+        return EXIT_INCOMPATIBLE_VERSION;
+    }
+
+    int i = 0;
+    while (NETMOUNT_VERSION[i] != '\0' && NETMOUNT_VERSION[i] == shared_data_ptr->netmount_version[i]) {
+        ++i;
+    }
+    if (NETMOUNT_VERSION[i] != '\0' || shared_data_ptr->netmount_version[i] != '\0') {
+        my_print_dos_string("Info: A different NetMount client version is installed\r\nInstalled \"$");
+        my_print_string_f(shared_data_ptr->netmount_version);
+        my_print_dos_string("\", expected \"" NETMOUNT_VERSION "\". The versions are ABI-compatible.\r\n$");
+    }
+
+    return EXIT_OK;
+}
+
+
 static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) {
     struct dos_current_dir __far * cds = get_cds(drive_no);
     if (cds == NULL) {
@@ -2436,8 +2474,6 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     return 0;
 }
 
-#define STRINGIFY(x) #x
-#define TOSTRING(x)  STRINGIFY(x)
 
 static void print_help(void) {
     my_print_dos_string(
@@ -2521,12 +2557,19 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_INSTALLED;
         }
 
+        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
+
+        {
+            int exit_code = check_netmount_compatibility(shared_data_ptr);
+            if (exit_code != EXIT_OK) {
+                return exit_code;
+            }
+        }
+
         if (argc != 2) {
             my_print_dos_string("Uninstall does not take additional arguments\r\n$");
             return EXIT_BAD_ARG;
         }
-
-        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
 
         interrupt_handler current_INT2F_handler = get_intr_vector(0x2F);
         if (current_INT2F_handler != MK_FP(shared_data_ptr->psp_segment, shared_data_ptr->int2F_redirector_offset)) {
@@ -2822,6 +2865,15 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_INSTALLED;
         }
 
+        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
+
+        {
+            int exit_code = check_netmount_compatibility(shared_data_ptr);
+            if (exit_code != EXIT_OK) {
+                return exit_code;
+            }
+        }
+
         int mount_drive_set = 0;
         union ipv4_addr remote_ip;
         uint16_t remote_port = DRIVE_PROTO_UDP_PORT;
@@ -2969,8 +3021,6 @@ int main(int argc, char * argv[]) {
             return EXIT_DRIVE_LETTER_ALREADY_USED;
         }
 
-        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
-
         const uint8_t remote_ip_idx = assign_remote_ip_addr_slot(shared_data_ptr, remote_ip);
         if (remote_ip_idx == 0xFF) {
             my_print_dos_string("Error: Not free slot for remote IP address\r\n$");
@@ -3012,12 +3062,19 @@ int main(int argc, char * argv[]) {
             return EXIT_NOT_INSTALLED;
         }
 
+        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
+
+        {
+            int exit_code = check_netmount_compatibility(shared_data_ptr);
+            if (exit_code != EXIT_OK) {
+                return exit_code;
+            }
+        }
+
         if (argc != 3) {
             my_print_dos_string("Bad argument count. Use umount <local_drive_letter> or /ALL\r\n$");
             return EXIT_BAD_ARG;
         }
-
-        struct shared_data __far * const shared_data_ptr = get_installed_shared_data_ptr(info.multiplex_id);
 
         int retval = EXIT_OK;
 

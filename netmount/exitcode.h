@@ -28,5 +28,6 @@
 #define EXIT_DRIVE_NOT_MOUNTED           -8
 #define EXIT_DRIVE_MOUNTED               -9
 #define EXIT_NOT_LAST_IN_INT2F_CHAIN     -10
+#define EXIT_INCOMPATIBLE_VERSION        -11
 
 #endif
