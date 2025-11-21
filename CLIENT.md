@@ -1,4 +1,4 @@
-# `netmount` (DOS Client)
+# `NetMount` (DOS Client)
 
 - A TSR driver for DOS that allows mounting shared directories from one or more remote machines as local drives.
 - It should work with MS-DOS 5.0 and newer and with sufficiently compatible systems such as FreeDOS.
@@ -57,10 +57,17 @@ Arguments:
 ```
 
 ## Using the Netmount DOS Client
+
 The netmount DOS client supports any interface for which a DOS Packet Driver class 1 (Ethernet II) exists,
 including Ethernet network adapters, serial, parallel, and other hardware interfaces.
 To use it, we must first install a Packet Driver in DOS. Then we install and configure the netmount client.
 After that, we can mount and unmount remote directories/disks.
+
+The NetMount client supports up to four remote IP addresses, allowing directories to be mounted
+from up to four servers. If one IP address is used only as a gateway (not as a NetMount server),
+up to three servers can be accessed simultaneously. This limit helps keep the NetMount client small
+and memory-efficient. The limit applies only to servers with different IP addresses. Connections
+to multiple NetMount servers on the same IP address but different UDP ports are not restricted.
 
 It is also recommended to set **LASTDRIVE** in "CONFIG.SYS". For example, `LASTDRIVE=Z` allows us to connect
 drives up to `Z`. That means DOS can access a total of 26 drives. Netmount allows the use of drive letters
