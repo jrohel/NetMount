@@ -1,14 +1,17 @@
 # NetMount
------------
+-----
 
 **NetMount** enables DOS systems to access shared directories from remote machines as if they were local drives. It operates over the UDP protocol. The DOS client supports any interface for which a DOS Packet Driver class 1 (Ethernet II) exists, including Ethernet network adapters, serial, parallel, and other hardware interfaces. NetMount is optimized for low-resource environments, making it suitable for retro computing, embedded platforms, and legacy system integration.
 
-It consist of two components:
+It consists of two core components:
 
 - **`netmount`**: A lightweight TSR (Terminate and Stay Resident) driver for DOS that allows access to remote directories as standard network drives.
 - **`netmount-server`**: A cross-platform server application for POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows, designed to share directories with DOS clients over a network or serial port using built-in SLIP protocol support.
 
-In addition to these core components, the NetMount project includes the supporting utility **`ninstall`**, a configuration-based installer (loader) for the DOS `netmount` client. [More info about the `ninstall`](NINSTALL.md)
+In addition to these core components, the NetMount project includes supporting utilities:
+
+- **`ninstall`**: A configuration-based installer (loader) for the DOS netmount client. [More info about the `ninstall`](NINSTALL.md)
+- **`nmmanage`**: A command-line management tool for inspecting and modifying the configuration of an installed NetMount DOS client. [More info about the `nmmanage`](NMMANAGE.md)
 
 -----
 ## `netmount` (DOS Client)
