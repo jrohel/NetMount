@@ -8,7 +8,7 @@ It consist of two components:
 - **`netmount`**: A lightweight TSR (Terminate and Stay Resident) driver for DOS that allows access to remote directories as standard network drives.
 - **`netmount-server`**: A cross-platform server application for POSIX-compliant operating systems (Linux, *BSD, macOS, etc.) and Microsoft Windows, designed to share directories with DOS clients over a network or serial port using built-in SLIP protocol support.
 
-In addition to these core components, the NetMount project includes the supporting utility **`ninstall`**, a configuration-based installer (loader) for the DOS `netmount` client. [More info about the `ninstall`](UTILS.md)
+In addition to these core components, the NetMount project includes the supporting utility **`ninstall`**, a configuration-based installer (loader) for the DOS `netmount` client. [More info about the `ninstall`](NINSTALL.md)
 
 -----
 ## `netmount` (DOS Client)
