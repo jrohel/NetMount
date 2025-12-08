@@ -905,6 +905,7 @@ static void handle_request_for_our_drive(void) {
 
             struct drive_proto_closef * const args = (struct drive_proto_closef * const)buff;
             args->start_cluster = sftptr->start_cluster;
+            args->date_time = sftptr->file_time;
             if (send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax) == 0) {
                 if (ax != 0) {
                     set_error(r, ax);

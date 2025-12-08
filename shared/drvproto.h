@@ -36,6 +36,7 @@ struct drive_proto_hdr {
 
 struct drive_proto_closef {
     uint16_t start_cluster;
+    uint32_t date_time;
 };
 
 

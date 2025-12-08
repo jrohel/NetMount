@@ -147,6 +147,23 @@ uint32_t time_to_fat(time_t t) {
     return res;
 }
 
+time_t fat_to_time(uint32_t date_time) {
+    struct tm ltime;
+    ltime.tm_isdst = -1;
+    ltime.tm_sec = (date_time & 0x1f) * 2;
+    date_time >>= 5;
+    ltime.tm_min = date_time & 0x3f;
+    date_time >>= 6;
+    ltime.tm_hour = date_time & 0x1f;
+    date_time >>= 5;
+    ltime.tm_mday = date_time & 0x1f;
+    date_time >>= 5;
+    ltime.tm_mon = (date_time & 0x0f) - 1;
+    date_time >>= 4;
+    ltime.tm_year = date_time + 80;
+    return mktime(&ltime);
+}
+
 }  // namespace
 
 
@@ -359,6 +376,14 @@ int32_t Drive::get_file_size(uint16_t handle) {
     item.update_last_used_timestamp();
 
     return fprops.size;
+}
+
+
+void Drive::set_file_date_time(uint16_t handle, uint32_t date_time) {
+    auto & item = get_item(handle);
+    auto file_time = std::chrono::file_clock::from_sys(std::chrono::system_clock::from_time_t(fat_to_time(date_time)));
+    std::filesystem::last_write_time(item.path, file_time);
+    item.update_last_used_timestamp();
 }
 
 
