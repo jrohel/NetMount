@@ -256,16 +256,22 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         }
 
         case INT2F_CLOSE_FILE: {
-            if (request_data_len != sizeof(drive_proto_closef)) {
+            auto * const request = reinterpret_cast<const drive_proto_closef *>(request_data);
+            uint32_t date_time = 0;
+            if (request_data_len == sizeof(drive_proto_closef)) {
+                date_time = from_little32(request->date_time);
+            } else if (request_data_len != sizeof(drive_proto_closef) - sizeof(uint32_t)) {
                 return -1;
             }
             // Only checking the existence of the handle because I don't keep files open.
-            auto * const request = reinterpret_cast<const drive_proto_closef *>(request_data);
             const uint16_t handle = from_little16(request->start_cluster);
-            const uint32_t date_time = from_little32(request->date_time);
             log(LogLevel::DEBUG, "CLOSE_FILE handle {} {:08X}\n", handle, date_time);
             try {
-                drive.set_file_date_time(handle, date_time);
+                if (date_time != 0) {
+                    drive.set_file_date_time(handle, date_time);
+                } else {
+                    drive.get_handle_path(handle);
+                }
             } catch (const std::runtime_error & ex) {
                 log(LogLevel::WARNING, "CLOSE_FILE handle {}: {}\n", handle, ex.what());
                 // TODO: Send error to client?
