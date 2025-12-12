@@ -1119,6 +1119,7 @@ static void handle_request_for_our_drive(void) {
                 }
                 *recvbufflen_ptr = 0;
             } while (bytes_left > 0);
+            sftptr->file_time = 0;
         } break;
 
         case INT2F_LOCK_UNLOCK_FILE: {
