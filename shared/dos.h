@@ -223,8 +223,13 @@ struct dos_sft {
     uint32_t file_time;      // file date and time
     uint32_t file_size;      // file length
     uint32_t file_pos;       // current file position
-    uint16_t rel_sector;
-    uint16_t abs_sector;
+    union {
+        struct {
+            uint16_t rel_sector;
+            uint16_t abs_sector;
+        };
+        uint32_t start_file_time;
+    };
     uint16_t dir_sector;
     uint8_t dir_entry_no;  // if local, number of directory entry within sector
     struct fcb_file_name file_name;

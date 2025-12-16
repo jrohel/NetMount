@@ -905,7 +905,11 @@ static void handle_request_for_our_drive(void) {
 
             struct drive_proto_closef * const args = (struct drive_proto_closef * const)buff;
             args->start_cluster = sftptr->start_cluster;
-            args->date_time = sftptr->file_time;
+            if (sftptr->start_file_time != sftptr->file_time) {
+                args->date_time = sftptr->file_time;
+            } else {
+                args->date_time = 0;
+            }
             if (send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax) == 0) {
                 if (ax != 0) {
                     set_error(r, ax);
@@ -1119,7 +1123,6 @@ static void handle_request_for_our_drive(void) {
                 }
                 *recvbufflen_ptr = 0;
             } while (bytes_left > 0);
-            sftptr->file_time = 0;
         } break;
 
         case INT2F_LOCK_UNLOCK_FILE: {
@@ -1361,8 +1364,7 @@ static void handle_request_for_our_drive(void) {
                 sft_ptr->file_pos = 0;
                 sft_ptr->open_mode &= 0xFF00U;
                 sft_ptr->open_mode |= args->mode;
-                sft_ptr->rel_sector = 0xFFFFU;
-                sft_ptr->abs_sector = 0xFFFFU;
+                sft_ptr->start_file_time = args->date_time;
                 sft_ptr->dir_sector = 0;
                 sft_ptr->dir_entry_no = 0xFF;  // why such value? no idea, EtherDFS says PHANTON.C uses that
                 sft_ptr->file_name = args->name;
