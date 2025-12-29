@@ -1,0 +1,159 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+Standard: c++20
+
+
+# Characters per line
+ColumnLimit: 120
+
+
+# Do not wrap comments according to ColumnLimit
+ReflowComments: Never
+
+
+# Indentation
+IndentWidth: 4
+AccessModifierOffset: -4
+UseTab: false
+
+
+KeepEmptyLines:
+  AtEndOfFile: false
+  AtStartOfBlock: true
+  AtStartOfFile: false
+
+MaxEmptyLinesToKeep: 2
+
+
+# Allowed:
+# if (a) {
+#    return;
+# }
+#
+# Forbidden:
+# if (a) { return; }
+#
+AllowShortBlocksOnASingleLine: Never
+
+
+# Allowed:
+# switch (a) {
+#     case 1:
+#         x = 1;
+#         break;
+# }
+#
+# Forbidden:
+# switch (a) {
+#     case 1: x = 1; break;
+#     case 2: return;
+# }
+#
+AllowShortCaseLabelsOnASingleLine: false
+
+
+# Allowed:
+# if (a)
+#     return ;
+# else {
+#     return;
+# }
+#
+# Forbidden:
+# if (a) return;
+# else
+#     return;
+#
+AllowShortIfStatementsOnASingleLine: Never
+
+
+# Allowed:
+# while (i < 1) {
+#     i--;
+# }
+#
+# Forbidden:
+# while (i < 1) i--;
+#
+AllowShortLoopsOnASingleLine: false
+
+
+# Force middle pointer and reference alignment.
+#
+# Examples:
+# char * str;
+# const std::string & str;
+#
+DerivePointerAlignment: false
+PointerAlignment: Middle
+ReferenceAlignment: Middle
+
+
+# Always break after an open bracket, if the parameters don't fit on a single line, e.g.:
+#
+# someLongFunction(
+#     argument1, argument2);
+#
+AlignAfterOpenBracket: AlwaysBreak
+
+
+# Allow only one argument/parameter per line.
+#
+# Allowed:
+# void f(int aaaaaaaaaaaaaaaaaaaa,
+#        int aaaaaaaaaaaaaaaaaaaa,
+#        int aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) {}
+#
+# Forbidden:
+# void f(int aaaaaaaaaaaaaaaaaaaa, int aaaaaaaaaaaaaaaaaaaa,
+#        int aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) {}
+#
+BinPackArguments: false
+BinPackParameters: false
+
+
+# If the function declaration doesn't fit on a line, put all parameters on the next line.
+#
+# Allowed:
+# void myFunction(
+#     int a, int b, int c, int d, int e);
+#
+# Forbidden:
+# void myFunction(int a,
+#                 int b,
+#                 int c,
+#                 int d,
+#                 int e);
+#
+AllowAllParametersOfDeclarationOnNextLine: true
+
+
+# Align consecutive C/C++ preprocessor macros.
+#
+# Example:
+# #define SHORT_NAME       42
+# #define LONGER_NAME      0x007f
+# #define EVEN_LONGER_NAME (2)
+# #define foo(x)           (x * x)
+# #define bar(y, z)        (y + z)
+#
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+
+# sort and group includes: c++, system, project
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  # C++ Standard Library headers
+  - Regex:           '<[[:alnum:]_-]+>'
+    Priority:        3
+  # system libraries
+  - Regex:           '<.+>'
+    Priority:        2
+  # project includes
+  - Regex:           '".+"'
+    Priority:        1
