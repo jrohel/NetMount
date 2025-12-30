@@ -681,10 +681,14 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         result_open_mode = stack_attr & 0xFF;
                         // check that item exists, and is neither a volume nor a directory
                         const auto attr = drive.get_server_path_dos_properties(server_path, &properties);
-                        if (attr == 0xFF || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
+                        if (attr == FAT_ERROR_ATTR) {
                             error = true;
-                        }
-                        if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
+                        } else if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
+                            throw FilesystemError(
+                                std::format(
+                                    "OPEN_FILE Item \"{}\" is either a DIR or a VOL\n", server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
+                        } else if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
                             throw FilesystemError(
                                 std::format(
                                     "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
@@ -729,10 +733,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 error = true;
                             }
                         } else if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
-                            log(LogLevel::WARNING,
-                                "OPEN/CREATE/EXTENDED_OPEN_CREATE Item \"{}\" is either a DIR or a VOL\n",
-                                server_path.string());
-                            error = true;
+                            throw FilesystemError(
+                                std::format(
+                                    "OPEN/CREATE/EXTENDED_OPEN_CREATE Item \"{}\" is either a DIR or a VOL\n", server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
                             if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
