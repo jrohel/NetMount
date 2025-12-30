@@ -133,6 +133,14 @@ uint32_t time_to_fat(time_t t) {
     uint32_t res;
     struct tm * ltime;
     ltime = localtime(&t);
+    if (ltime->tm_year < 80) {
+        // 1980-01-01 00:00:00 - DOS FAT minimum timestamp
+        return ((1U << 5) + 1U) << 16;
+    }
+    if (ltime->tm_year > 207) {
+        // 2107-12-31 23:59:58 - DOS FAT maximu timestamp
+        return (((0x7FU << 9) + (12U << 5) + 31U) << 16) + (23U << 11) + (59U << 5) + (58U >> 1);
+    }
     res = ltime->tm_year - 80;  // tm_year is years from 1900, FAT is years from 1980
     res <<= 4;
     res |= ltime->tm_mon + 1;  // tm_mon is in range 0..11 while FAT expects 1..12
