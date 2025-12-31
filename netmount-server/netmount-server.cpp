@@ -484,6 +484,13 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     relative_path.string(),
                     ex.what());
                 *ax = to_little16(ex.get_dos_err_code());
+            } catch (const std::runtime_error & ex) {
+                log(LogLevel::WARNING,
+                    "DELETE_FILE \"{:c}:\\{}\": {}\n",
+                    reqdrv + 'A',
+                    relative_path.string(),
+                    ex.what());
+                *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
             }
         } break;
 
@@ -681,7 +688,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         result_open_mode = stack_attr & 0xFF;
                         // check that item exists, and is neither a volume nor a directory
                         const auto attr = drive.get_server_path_dos_properties(server_path, &properties);
-                        if (attr == 0xFF || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
+                        if (attr == FAT_ERROR_ATTR || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
                             error = true;
                         }
                         if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
@@ -703,7 +710,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 DOS_EXTERR_ACCESS_DENIED);
                         }
                         properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
-                        result_open_mode = 2;  // read/write
+                        result_open_mode = OPEN_MODE_RDWR;
                     } else {
                         log(LogLevel::DEBUG,
                             "EXTENDED_OPEN_CREATE_FILE \"{}\", stack_attr=0x{:04X}, action_code=0x{:04X}, "
