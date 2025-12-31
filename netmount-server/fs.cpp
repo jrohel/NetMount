@@ -483,7 +483,7 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
 
     if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
         auto server_path = root / client_path;
-        return {server_path, std::filesystem::exists(server_path)};
+        return {server_path, std::filesystem::exists(server_path) || std::filesystem::is_symlink(server_path)};
     }
 
     std::filesystem::path server_path = root;
@@ -592,7 +592,12 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
     const auto [server_path, exist] = create_server_path(client_pattern);
 
     if (exist) {
-        if (get_server_path_attrs(server_path) & FAT_RO) {
+        uint8_t attrs = 0;
+        try {
+            attrs = get_server_path_attrs(server_path);
+        } catch (const std::runtime_error &) {
+        }
+        if (attrs & FAT_RO) {
             throw FilesystemError(
                 std::format("Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
                 DOS_EXTERR_ACCESS_DENIED);
@@ -631,7 +636,12 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             // if match, delete the file
             const auto & path_str = dentry.path().string();
             if (match_fcb_name_to_mask(filfcb, short_name_to_fcb(path_str))) {
-                if (get_server_path_attrs(dentry.path()) & FAT_RO) {
+                uint8_t attrs = 0;
+                try {
+                    attrs = get_server_path_attrs(dentry.path());
+                } catch (const std::runtime_error &) {
+                }
+                if (attrs & FAT_RO) {
                     log(LogLevel::WARNING,
                         "Access denied: File \"{}\" has the READ_ONLY attribute",
                         dentry.path().string());
@@ -658,7 +668,12 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
 
         if (match_fcb_name_to_mask(filfcb, file_properties.fcb_name)) {
             const auto path = directory / file_properties.server_name;
-            if (get_server_path_attrs(path) & FAT_RO) {
+            uint8_t attrs = 0;
+            try {
+                attrs = get_server_path_attrs(path);
+            } catch (const std::runtime_error &) {
+            }
+            if (attrs & FAT_RO) {
                 log(LogLevel::WARNING, "Access denied: File \"{}\" has the READ_ONLY attribute", path.string());
                 continue;
             }
@@ -916,7 +931,10 @@ uint8_t get_path_dos_properties(
     std::error_code ec;
     uint8_t attrs = std::filesystem::is_directory(path, ec) ? FAT_DIRECTORY : 0;
     if (ec) {
-        return FAT_ERROR_ATTR;  // error (probably doesn't exist)
+        // It may be a symlink pointing to a nonexistent path
+        if (!std::filesystem::is_symlink(path, ec)) {
+            return FAT_ERROR_ATTR;  // error (is not a symlink, probably the path doesn't exist)
+        }
     }
 
     if (properties) {
@@ -954,6 +972,10 @@ uint8_t get_path_dos_properties(
                 properties->size = 0;
             }
         }
+    }
+
+    if (ec) {
+        return attrs;
     }
 
     try {
@@ -1089,11 +1111,11 @@ void resize_file(const std::filesystem::path & path, uint32_t new_size) {
 
 
 void delete_file(const std::filesystem::path & file) {
-    if (!std::filesystem::exists(file)) {
-        throw FilesystemError("delete_files: File does not exist: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
+    if (!std::filesystem::exists(file) && !std::filesystem::is_symlink(file)) {
+        throw FilesystemError("delete_file: File does not exist: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
     }
     if (std::filesystem::is_directory(file)) {
-        throw FilesystemError("delete_files: Is a directory: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
+        throw FilesystemError("delete_file: Is a directory: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
     }
     std::filesystem::remove(file);
 }
