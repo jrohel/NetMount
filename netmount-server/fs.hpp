@@ -117,6 +117,9 @@ public:
     /// Returns the size of file defined by handle (or -1 on error)
     int32_t get_file_size(uint16_t handle);
 
+    /// Throws exception on error
+    void set_file_date_time(uint16_t handle, uint32_t date_time);
+
     /// Searches for files matching template `tmpl` in directory defined by `handle`
     /// with at most attributes `attr`.
     /// Fills in `properties` with the next match after `nth` and updates `nth`
