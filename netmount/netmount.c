@@ -2373,6 +2373,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
         my_print_dos_string("Error: Cannot get CDS for mounted drive.\r\n$");
         return 1;
     }
+
     cds->flags = 0;
 
 
