@@ -2375,6 +2375,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
     }
     cds->flags = 0;
 
+
     shared_data_ptr->drive_map[drive_no] = 0xFF;
     shared_data_ptr->drives[drive_no].remote_ip_idx = 0xFF;
     return 0;
