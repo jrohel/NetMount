@@ -1,0 +1,28 @@
+name: Build NetMount server (FreeBSD 15.0)
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build-freebsd:
+    name: Build netmount-server on FreeBSD 15.0 (emulated)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup FreeBSD emulator and build
+        uses: cross-platform-actions/action@v0.32.0
+        with:
+          operating_system: freebsd
+          version: '15.0'
+          run: |
+            cd netmount-server
+            make -f Makefile.freebsd

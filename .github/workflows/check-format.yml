@@ -1,0 +1,64 @@
+name: Format check
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  clang-format:
+    name: Check format using clang-format-diff
+    runs-on: ubuntu-24.04
+
+    steps:
+      # Checkout the repository with full history to enable git diff
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned clang-format
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          export TZ=Etc/UTC
+          sudo apt-get update
+          sudo apt-get install -y clang-format-20
+
+      - name: Show clang-format version
+        run: clang-format --version
+
+      # Run clang-format on changed source files only
+      - name: Run clang-format diff on changed files
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          echo "Fetching base branch $BASE_REF..."
+          git fetch origin $BASE_REF
+
+          echo "Running clang-format diff..."
+          git diff -U3 origin/$BASE_REF...HEAD -- '*.c' '*.cpp' '*.h' '*.hpp' \
+            | clang-format-diff-20 -p1 -style=file > clang-format.diff
+
+          # If diff is non-empty, create GitHub annotations
+          if [ -s clang-format.diff ]; then
+            echo "Found formatting issues"
+            cat clang-format.diff
+            echo "Generating GitHub annotations for formating issues ..."
+            while IFS= read -r line; do
+              if [[ $line =~ ^\+\+\+ ]]; then
+                file=${line#+++ b/}
+              elif [[ $line =~ ^@@ ]]; then
+                lineno=$(echo "$line" | sed -E 's/^@@ -[0-9]+,[0-9]+ \+([0-9]+),[0-9]+ @@.*/\1/')
+              elif [[ -n $line && $line =~ ^\+ ]]; then
+                echo "::error file=$file,line=$lineno::Bad formatting: ${line#?}"
+                lineno=$((lineno+1))
+              elif [[ -n $line && ! $line =~ ^- ]]; then
+                lineno=$((lineno+1))
+              fi
+            done < clang-format.diff
+            exit 1
+          else
+            echo "No formatting issues detected."
+          fi

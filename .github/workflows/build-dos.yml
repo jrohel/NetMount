@@ -1,0 +1,36 @@
+name: Build NetMount client and utilities (DOS / OpenWatcom)
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build-dos:
+    name: Build DOS binaries (OpenWatcom container)
+    runs-on: ubuntu-24.04
+    container:
+      image: docker.io/arlaneenalra/watcom-docker:latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build netmount DOS
+        run: |
+          cd netmount
+          make -f Makefile
+
+      - name: Build nmmanage DOS
+        run: |
+          cd nmmanage
+          make -f Makefile
+
+      - name: Build netmount DOS
+        run: |
+          cd ninstall
+          make -f Makefile

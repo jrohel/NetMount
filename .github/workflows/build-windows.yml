@@ -1,0 +1,33 @@
+name: Build NetMount server (Windows / MinGW)
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build netmount-server for Windows (MinGW)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install MinGW toolchain
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          export TZ=Etc/UTC
+          sudo apt-get update
+          sudo apt-get install -y \
+            mingw-w64 \
+            make
+
+      - name: Build netmount-server (Windows target)
+        run: |
+          cd netmount-server
+          CXX=x86_64-w64-mingw32-g++ make -f Makefile.windows

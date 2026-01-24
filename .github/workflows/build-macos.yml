@@ -1,0 +1,29 @@
+name: Build NetMount server (macOS 15 Arm64)
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build netmount-server on macOS 15 Arm64
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install make
+
+      - name: Build netmount-server
+        run: |
+          cd netmount-server
+          make -f Makefile.macos

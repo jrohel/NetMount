@@ -1,0 +1,31 @@
+name: Build NetMount server (Linux)
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build netmount-server on Linux
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          export TZ=Etc/UTC
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build netmount-server
+        run: |
+          cd netmount-server
+          make -f Makefile.linux
