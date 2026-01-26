@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2025-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
@@ -658,8 +658,8 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const uint16_t action_code = from_little16(request->action);
             const uint16_t ext_open_create_open_mode = from_little16(request->mode);
 
+            const auto relative_path = create_relative_path(request_data + 6, request_data_len - 6);
             try {
-                const auto relative_path = create_relative_path(request_data + 6, request_data_len - 6);
                 const auto [server_path, exist] = drive.create_server_path(relative_path);
                 const auto server_directory = server_path.parent_path();
 
@@ -675,7 +675,6 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         server_directory.string());
                     *ax = to_little16(DOS_EXTERR_PATH_NOT_FOUND);
                 } else {
-                    bool error = false;
                     uint8_t result_open_mode;
                     uint16_t ext_open_create_result_code = 0;
                     DosFileProperties properties;
@@ -686,10 +685,16 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             server_path.string(),
                             stack_attr);
                         result_open_mode = stack_attr & 0xFF;
-                        // check that item exists, and is neither a volume nor a directory
                         const auto attr = drive.get_server_path_dos_properties(server_path, &properties);
-                        if (attr == FAT_ERROR_ATTR || ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0)) {
-                            error = true;
+                        if (attr == FAT_ERROR_ATTR) {
+                            throw FilesystemError(
+                                std::format("OPEN_FILE: Cannot get attributes for \"{}\"", server_path.string()),
+                                DOS_EXTERR_FILE_NOT_FOUND);
+                        }
+                        if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
+                            throw FilesystemError(
+                                std::format("OPEN_FILE: Item \"{}\" is either a DIR or a VOL", server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
                         }
                         if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
                             throw FilesystemError(
@@ -730,16 +735,18 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_CREATED;
                             } else {
-                                log(LogLevel::WARNING,
-                                    "EXTENDED_OPEN_CREATE_FILE fail: file \"{}\" does not exist\n",
-                                    server_path.string());
-                                error = true;
+                                throw FilesystemError(
+                                    std::format(
+                                        "EXTENDED_OPEN_CREATE_FILE fail: file \"{}\" does not exist",
+                                        server_path.string()),
+                                    DOS_EXTERR_FILE_NOT_FOUND);
                             }
                         } else if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
-                            log(LogLevel::WARNING,
-                                "OPEN/CREATE/EXTENDED_OPEN_CREATE Item \"{}\" is either a DIR or a VOL\n",
-                                server_path.string());
-                            error = true;
+                            throw FilesystemError(
+                                std::format(
+                                    "EXTENDED_OPEN_CREATE_FILE: Item \"{}\" is either a DIR or a VOL",
+                                    server_path.string()),
+                                DOS_EXTERR_ACCESS_DENIED);
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
                             if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
@@ -756,53 +763,54 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_TRUNCATED;
                             } else {
-                                log(LogLevel::WARNING, "OPEN/CREATE/EXTENDED_OPEN_CREATE Fail, file already exists\n");
-                                error = true;
+                                throw FilesystemError(
+                                    std::format(
+                                        "EXTENDED_OPEN_CREATE_FILE fail: file \"{}\" already exists",
+                                        server_path.string()),
+                                    DOS_EXTERR_ACCESS_DENIED);
                             }
                         }
                     }
 
-                    if (error) {
-                        log(LogLevel::WARNING,
-                            "OPEN/CREATE/EXTENDED_OPEN_CREATE failed \"{:c}:\\{}\", stack_attr=0x{:04X}\n",
-                            reqdrv + 'A',
-                            relative_path.string(),
-                            stack_attr);
-                        *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
-                    } else {
-                        // success (found a file, created it or truncated it)
-                        const auto handle = drive.get_handle(server_path);
-                        const auto fcb_name = short_name_to_fcb(relative_path.filename().string());
-                        log(LogLevel::DEBUG, "File \"{}\", handle {}\n", server_path.string(), handle);
-                        log(LogLevel::DEBUG, "    FCB file name: {}\n", fcb_file_name_to_cstr(fcb_name));
-                        log(LogLevel::DEBUG, "    size: {}\n", properties.size);
-                        log(LogLevel::DEBUG, "    attrs: 0x{:02X}\n", properties.attrs);
-                        log(LogLevel::DEBUG, "    date_time: {:04X}\n", properties.time_date);
-                        if (handle == 0xFFFFU) {
-                            log(LogLevel::WARNING,
-                                "OPEN/CREATE/EXTENDED_OPEN_CREATE Failed to get file handle \"{:c}:\\{}\", ({})\n",
-                                reqdrv + 'A',
-                                relative_path.string(),
-                                server_path.string());
-                            return -1;
-                        }
-                        auto * const reply = reinterpret_cast<drive_proto_open_create_reply *>(reply_data);
-                        reply->attrs = properties.attrs;
-                        reply->name = fcb_name;
-                        reply->date_time = to_little32(properties.time_date);
-                        reply->size = to_little32(properties.size);
-                        reply->start_cluster = to_little16(handle);
-                        // CX result (only relevant for EXTENDED_OPEN_CREATE)
-                        reply->result_code = to_little16(ext_open_create_result_code);
-                        reply->mode = result_open_mode;
-                        reply_packet_len = sizeof(drive_proto_open_create_reply);
+                    // success (found a file, created it or truncated it)
+                    const auto handle = drive.get_handle(server_path);
+                    const auto fcb_name = short_name_to_fcb(relative_path.filename().string());
+                    log(LogLevel::DEBUG, "File \"{}\", handle {}\n", server_path.string(), handle);
+                    log(LogLevel::DEBUG, "    FCB file name: {}\n", fcb_file_name_to_cstr(fcb_name));
+                    log(LogLevel::DEBUG, "    size: {}\n", properties.size);
+                    log(LogLevel::DEBUG, "    attrs: 0x{:02X}\n", properties.attrs);
+                    log(LogLevel::DEBUG, "    date_time: {:04X}\n", properties.time_date);
+                    if (handle == 0xFFFFU) {
+                        throw FilesystemError(
+                            std::format("Failed to get file handle for \"{}\"", server_path.string()),
+                            DOS_EXTERR_TOO_MANY_OPEN_FILES);
                     }
+                    auto * const reply = reinterpret_cast<drive_proto_open_create_reply *>(reply_data);
+                    reply->attrs = properties.attrs;
+                    reply->name = fcb_name;
+                    reply->date_time = to_little32(properties.time_date);
+                    reply->size = to_little32(properties.size);
+                    reply->start_cluster = to_little16(handle);
+                    // CX result (only relevant for EXTENDED_OPEN_CREATE)
+                    reply->result_code = to_little16(ext_open_create_result_code);
+                    reply->mode = result_open_mode;
+                    reply_packet_len = sizeof(drive_proto_open_create_reply);
                 }
             } catch (const FilesystemError & ex) {
-                log(LogLevel::WARNING, "OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ex.what());
+                log(LogLevel::WARNING,
+                    "OPEN/CREATE/EXTENDED_OPEN_CREATE \"{:c}:\\{}\", stack_attr=0x{:04X}: {}\n",
+                    reqdrv + 'A',
+                    relative_path.string(),
+                    stack_attr,
+                    ex.what());
                 *ax = to_little16(ex.get_dos_err_code());
             } catch (const std::runtime_error & ex) {
-                log(LogLevel::WARNING, "OPEN/CREATE/EXTENDED_OPEN_CREATE: {}\n", ex.what());
+                log(LogLevel::WARNING,
+                    "OPEN/CREATE/EXTENDED_OPEN_CREATE \"{:c}:\\{}\", stack_attr=0x{:04X}: {}\n",
+                    reqdrv + 'A',
+                    relative_path.string(),
+                    stack_attr,
+                    ex.what());
                 *ax = to_little16(DOS_EXTERR_FILE_NOT_FOUND);
             }
         } break;
@@ -887,7 +895,7 @@ void print_help(const char * program_name) {
 
     print(
         stdout,
-        "NetMount server {}, Copyright 2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
+        "NetMount server {}, Copyright 2025-2026 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
         "NetMount server comes with ABSOLUTELY NO WARRANTY. This is free software\n"
         "and you are welcome to redistribute it under the terms of the GNU GPL v2.\n\n",
         PROGRAM_VERSION);
