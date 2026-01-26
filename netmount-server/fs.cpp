@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2025-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "fs.hpp"
 
@@ -264,12 +264,14 @@ uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
 
 Drive::Item & Drive::get_item(uint16_t handle) {
     if (handle >= items.size()) {
-        throw std::runtime_error(
-            std::format("Handle {} is invalid - only {} handles are currently allocated", handle, items.size()));
+        throw FilesystemError(
+            std::format("Handle {} is invalid - only {} handles are currently allocated", handle, items.size()),
+            DOS_EXTERR_INVALID_HANDLE);
     }
     Item & item = items[handle];
     if (item.path.empty()) {
-        throw std::runtime_error(std::format("Handle {} is invalid because it is empty", handle));
+        throw FilesystemError(
+            std::format("Handle {} is invalid because it is empty", handle), DOS_EXTERR_INVALID_HANDLE);
     }
     return item;
 }
@@ -295,13 +297,13 @@ int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16
     auto * const fd = fopen(fname.c_str(), "rb");
 #endif
     if (!fd) {
-        throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
+        throw FilesystemError(std::format("Cannot open file: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
 
     if (fseek(fd, offset, SEEK_SET) != 0) {
         const auto orig_errno = errno;
         fclose(fd);
-        throw std::runtime_error(std::format("Cannot seek in file: {}", strerror(orig_errno)));
+        throw FilesystemError(std::format("Cannot seek in file: {}", strerror(orig_errno)), DOS_EXTERR_SEEK_ERROR);
     }
 
     const auto res = fread(buffer, 1, len, fd);
@@ -339,13 +341,13 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
     auto * const fd = fopen(fname.c_str(), "r+b");
 #endif
     if (!fd) {
-        throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
+        throw FilesystemError(std::format("Cannot open file: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
 
     if (fseek(fd, offset, SEEK_SET) != 0) {
         const auto orig_errno = errno;
         fclose(fd);
-        throw std::runtime_error(std::format("Cannot seek in file: {}", strerror(orig_errno)));
+        throw FilesystemError(std::format("Cannot seek in file: {}", strerror(orig_errno)), DOS_EXTERR_SEEK_ERROR);
     }
 
     const auto res = fwrite(buffer, 1, len, fd);
@@ -483,6 +485,11 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
 
     if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
         auto server_path = root / client_path;
+        if (!std::filesystem::exists(server_path.parent_path())) {
+            throw FilesystemError(
+                std::format("create_server_path: Parent path not found: {}", server_path.parent_path().string()),
+                DOS_EXTERR_PATH_NOT_FOUND);
+        }
         return {server_path, std::filesystem::exists(server_path) || std::filesystem::is_symlink(server_path)};
     }
 
@@ -499,8 +506,9 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
                 server_path /= *prev_it;
                 return {server_path, false};
             }
-            throw std::runtime_error(
-                std::format("create_server_path: Parent path not found: {}", (server_path / *prev_it).string()));
+            throw FilesystemError(
+                std::format("create_server_path: Parent path not found: {}", (server_path / *prev_it).string()),
+                DOS_EXTERR_PATH_NOT_FOUND);
         }
         server_path /= server_name;
         if (it == it_end) {
@@ -513,7 +521,7 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
 void Drive::make_dir(const std::filesystem::path & client_path) {
     auto [server_path, exist] = create_server_path(client_path);
     if (exist) {
-        throw std::runtime_error("make_dir: Directory exists: " + server_path.string());
+        throw FilesystemError("make_dir: Directory exists: " + server_path.string(), DOS_EXTERR_ACCESS_DENIED);
     }
     netmount_srv::make_dir(server_path);
 
@@ -543,7 +551,8 @@ void Drive::delete_dir(const std::filesystem::path & client_path) {
 void Drive::change_dir(const std::filesystem::path & client_path) {
     auto [server_path, exist] = create_server_path(client_path);
     if (!exist) {
-        throw std::runtime_error("change_dir: Directory does not exist: " + server_path.string());
+        throw FilesystemError(
+            "change_dir: Directory does not exist: " + server_path.string(), DOS_EXTERR_PATH_NOT_FOUND);
     }
     netmount_srv::change_dir(server_path);
 }
@@ -568,7 +577,19 @@ uint8_t Drive::get_server_path_attrs(const std::filesystem::path & server_path) 
 
 uint8_t Drive::get_dos_properties(const std::filesystem::path & client_path, DosFileProperties * properties) {
     auto [server_path, exist] = create_server_path(client_path);
-    return get_server_path_dos_properties(server_path, properties);
+    if (!exist) {
+        throw FilesystemError(
+            std::format("get_dos_properties: File not found: {}", server_path.string()), DOS_EXTERR_FILE_NOT_FOUND);
+    }
+
+    auto attrs = get_server_path_dos_properties(server_path, properties);
+    if (attrs == FAT_ERROR_ATTR) {
+        throw FilesystemError(
+            std::format("get_dos_properties: get attributes failed: {}", server_path.string()),
+            DOS_EXTERR_FILE_NOT_FOUND);
+    }
+
+    return attrs;
 }
 
 
@@ -1029,17 +1050,17 @@ uint8_t get_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[ma
 
 void make_dir(const std::filesystem::path & dir) {
     if (!std::filesystem::create_directory(dir)) {
-        throw std::runtime_error("make_dir: Directory exists: " + dir.string());
+        throw FilesystemError("make_dir: Directory exists: " + dir.string(), DOS_EXTERR_ACCESS_DENIED);
     }
 }
 
 
 void delete_dir(const std::filesystem::path & dir) {
     if (!std::filesystem::exists(dir)) {
-        throw std::runtime_error("delete_dir: Directory does not exist: " + dir.string());
+        throw FilesystemError("delete_dir: Directory does not exist: " + dir.string(), DOS_EXTERR_PATH_NOT_FOUND);
     }
     if (!std::filesystem::is_directory(dir)) {
-        throw std::runtime_error("delete_dir: Not a directory: " + dir.string());
+        throw FilesystemError("delete_dir: Not a directory: " + dir.string(), DOS_EXTERR_ACCESS_DENIED);
     }
     std::filesystem::remove(dir);
 }
@@ -1056,7 +1077,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
     auto * const fd = fopen(path.c_str(), "wb");
 #endif
     if (!fd) {
-        throw std::runtime_error(std::format("Cannot open file: {}", strerror(errno)));
+        throw FilesystemError(std::format("Cannot open file: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
     fclose(fd);
 
@@ -1086,24 +1107,25 @@ void resize_file(const std::filesystem::path & path, uint32_t new_size) {
         std::filesystem::resize_file(path, new_size);
         return;
     } catch (const std::filesystem::filesystem_error &) {
-        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(errno)));
+        throw FilesystemError(std::format("Cannot resize file: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
 #else
     // Fallback to platform-specific implementation
 #ifdef _WIN32
     FILE * const f = _wfopen(path.c_str(), L"r+b");
     if (!f) {
-        throw std::runtime_error(std::format("Cannot open file for resize: {}", strerror(errno)));
+        throw FilesystemError(
+            std::format("Cannot open file for resize: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
     const int fd = _fileno(f);
     const auto err = _chsize_s(fd, new_size);
     fclose(f);
     if (err != 0) {
-        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(err)));
+        throw FilesystemError(std::format("Cannot resize file: {}", strerror(err)), DOS_EXTERR_ACCESS_DENIED);
     }
 #else
     if (truncate(path.string().c_str(), new_size) != 0) {
-        throw std::runtime_error(std::format("Cannot resize file: {}", strerror(errno)));
+        throw FilesystemError(std::format("Cannot resize file: {}", strerror(errno)), DOS_EXTERR_ACCESS_DENIED);
     }
 #endif
 #endif
@@ -1115,19 +1137,14 @@ void delete_file(const std::filesystem::path & file) {
         throw FilesystemError("delete_file: File does not exist: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
     }
     if (std::filesystem::is_directory(file)) {
-        throw FilesystemError("delete_file: Is a directory: " + file.string(), DOS_EXTERR_FILE_NOT_FOUND);
+        throw FilesystemError("delete_file: Is a directory: " + file.string(), DOS_EXTERR_ACCESS_DENIED);
     }
     std::filesystem::remove(file);
 }
 
 
 void rename_file(const std::filesystem::path & old_name, const std::filesystem::path & new_name) {
-    std::error_code ec;
-    std::filesystem::rename(old_name, new_name, ec);
-    if (ec) {
-        throw std::runtime_error(
-            "rename_file: Cannot rename " + old_name.string() + " to " + new_name.string() + ": " + ec.message());
-    }
+    std::filesystem::rename(old_name, new_name);
 }
 
 
