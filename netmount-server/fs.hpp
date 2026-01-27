@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2025-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #ifndef _FS_HPP_
 #define _FS_HPP_
@@ -78,6 +78,9 @@ public:
 
     // Returns root path of shared drive.
     const std::filesystem::path & get_root() const noexcept { return root; }
+
+    bool is_read_only() const noexcept { return read_only; }
+    void set_read_only(bool read_only) noexcept { this->read_only = read_only; }
 
     void set_attrs_mode(AttrsMode mode) { attrs_mode = mode; }
 
@@ -179,6 +182,7 @@ private:
 
     bool used{false};
     std::filesystem::path root;
+    bool read_only{false};
     fcb_file_name volume_label;
     bool has_volume_label{false};
     AttrsMode attrs_mode{AttrsMode::AUTO};

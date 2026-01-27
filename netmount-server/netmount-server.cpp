@@ -353,6 +353,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             auto * const request = reinterpret_cast<const drive_proto_writef *>(request_data);
             const uint32_t offset = from_little32(request->offset);
             const uint16_t handle = from_little16(request->start_cluster);
+
             log(LogLevel::DEBUG,
                 "WRITE_FILE handle {}, {} bytes, offset {}\n",
                 handle,
@@ -527,6 +528,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 return -1;
             }
             const auto relative_path = create_relative_path(request_data, request_data_len);
+
             log(LogLevel::DEBUG, "DELETE_FILE \"{:c}:\\{}\"\n", reqdrv + 'A', relative_path.string());
             try {
                 drive.delete_files(relative_path);
@@ -734,31 +736,44 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 std::format("OPEN_FILE: Item \"{}\" is either a DIR or a VOL", server_path.string()),
                                 DOS_EXTERR_ACCESS_DENIED);
                         }
-                        if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
-                            throw FilesystemError(
-                                std::format(
-                                    "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
-                                DOS_EXTERR_ACCESS_DENIED);
+                        if (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) {
+                            if (drive.is_read_only()) {
+                                throw FilesystemError(
+                                    "OPEN_FILE: Access denied: Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+                            }
+                            if (attr & FAT_RO) {
+                                throw FilesystemError(
+                                    std::format(
+                                        "OPEN_FILE: Access denied: File \"{}\" has the READ_ONLY attribute",
+                                        server_path.string()),
+                                    DOS_EXTERR_ACCESS_DENIED);
+                            }
                         }
                     } else if (function == INT2F_CREATE_FILE) {
                         log(LogLevel::DEBUG,
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
                             server_path.string(),
                             stack_attr);
+                        if (drive.is_read_only()) {
+                            throw FilesystemError(
+                                "CREATE_FILE: Access denied: Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+                        }
                         const bool file_exists = std::filesystem::exists(server_path);
                         if (file_exists) {
                             const auto attr = drive.get_server_path_attrs(server_path);
                             if (attr & FAT_RO) {
                                 throw FilesystemError(
                                     std::format(
-                                        "Access denied: File \"{}\" already exists and has the READ_ONLY attribute",
+                                        "CREATE_FILE: Access denied: File \"{}\" already exists and has the READ_ONLY "
+                                        "attribute",
                                         server_path.string()),
                                     DOS_EXTERR_ACCESS_DENIED);
                             }
                             if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
                                 throw FilesystemError(
                                     std::format(
-                                        "Access denied: Replace file \"{}\" cannot remove system attribute",
+                                        "CREATE_FILE: Access denied: Replace file \"{}\" cannot remove system "
+                                        "attribute",
                                         server_path.string()),
                                     DOS_EXTERR_ACCESS_DENIED);
                             }
@@ -785,6 +800,11 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             log(LogLevel::DEBUG, "File doesn't exist -> ");
                             if ((action_code & IF_NOT_EXIST_MASK) == ACTION_CODE_CREATE_IF_NOT_EXIST) {
                                 log(LogLevel::DEBUG, "create file\n");
+                                if (drive.is_read_only()) {
+                                    throw FilesystemError(
+                                        "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
+                                        DOS_EXTERR_DISK_WRITE_PROTECTED);
+                                }
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                                 // Recreates directory_list
                                 drive.create_server_path(relative_path, true);
@@ -805,28 +825,43 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
                             if ((action_code & IF_EXIST_MASK) == ACTION_CODE_OPEN_IF_EXIST) {
-                                if ((attr & FAT_RO) && (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) {
-                                    throw FilesystemError(
-                                        std::format(
-                                            "Access denied: Cannot open READ_ONLY file \"{}\" for writing",
-                                            server_path.string()),
-                                        DOS_EXTERR_ACCESS_DENIED);
-                                }
                                 log(LogLevel::DEBUG, "open file\n");
+                                if (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) {
+                                    if (drive.is_read_only()) {
+                                        throw FilesystemError(
+                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
+                                            DOS_EXTERR_DISK_WRITE_PROTECTED);
+                                    }
+                                    if (attr & FAT_RO) {
+                                        throw FilesystemError(
+                                            std::format(
+                                                "EXTENDED_OPEN_CREATE_FILE: Access denied: Cannot open READ_ONLY file "
+                                                "\"{}\" for writing",
+                                                server_path.string()),
+                                            DOS_EXTERR_ACCESS_DENIED);
+                                    }
+                                }
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
                             } else if ((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST) {
                                 log(LogLevel::DEBUG, "replace file\n");
+                                if (drive.is_read_only()) {
+                                    throw FilesystemError(
+                                        "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
+                                        DOS_EXTERR_DISK_WRITE_PROTECTED);
+                                }
                                 if (attr & FAT_RO) {
                                     throw FilesystemError(
                                         std::format(
-                                            "Access denied: Cannot replace file \"{}\" with the READ_ONLY attribute",
+                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Cannot replace file \"{}\" with "
+                                            "the READ_ONLY attribute",
                                             server_path.string()),
                                         DOS_EXTERR_ACCESS_DENIED);
                                 }
                                 if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
                                     throw FilesystemError(
                                         std::format(
-                                            "Access denied: Replace file \"{}\" cannot remove system attribute",
+                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Replace file \"{}\" cannot "
+                                            "remove system attribute",
                                             server_path.string()),
                                         DOS_EXTERR_ACCESS_DENIED);
                                 }
@@ -971,8 +1006,9 @@ void print_help(const char * program_name) {
         "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
         "[--translit-map-path=<PATH>] [--log-level=<LEVEL>] "
-        "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>] "
-        "[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]\n\n",
+        "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]"
+        "[,readonly=<MODE>] [... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]"
+        "[,readonly=<MODE>]]\n\n",
         program_name);
 
     print(
@@ -991,7 +1027,8 @@ void print_help(const char * program_name) {
         "  attrs=<storage_method>      File attribute storage method: AUTO, IGNORE" NATIVE EXTENDED
         " (default: AUTO)\n"
         "  label=<volume_label>        volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
-        "  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)\n",
+        "  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)\n"
+        "  readonly=<MODE>             enable read-only sharing: 0 = writable, 1 = read-only (default: writable)\n",
         DRIVE_PROTO_UDP_PORT,
         DEFAULT_VOLUME_LABEL);
 
@@ -1144,6 +1181,24 @@ int parse_share_definition(std::string_view share) {
                 continue;
             }
             print(stdout, "Unknown file name conversion method \"{}\"\n", value);
+            return -1;
+        }
+        if (option == "readonly") {
+            const auto value = get_token(share, ',', ++offset);
+            log(LogLevel::INFO,
+                "Set read-only mode for drive \"{:c}\" path \"{}\" to \"{}\"\n",
+                drive_char,
+                drive.get_root().string(),
+                value);
+            if (value == "0") {
+                drive.set_read_only(false);
+                continue;
+            }
+            if (value == "1") {
+                drive.set_read_only(true);
+                continue;
+            }
+            print(stdout, "Unknown read-only mode \"{}\"\n", value);
             return -1;
         }
         print(stdout, "Unknown argument \"{}\"\n", option);
@@ -1340,17 +1395,19 @@ int main(int argc, char ** argv) {
         }
 
         if (print_header) {
-            print(stdout, "attrs mode | drive | path\n");
+            print(stdout, "attrs mode |   access   | drive | path\n");
             print_header = false;
         }
 
         is_file_name_conversion_active |= drive.get_file_name_conversion() != Drive::FileNameConversion::OFF;
 
         const auto attrs_mode = drive.get_attrs_mode();
+        const auto read_only = drive.is_read_only();
         print(
             stdout,
-            "{:^11}|   {:c}   | {}\n",
+            "{:^11}|{:^12}|   {:c}   | {}\n",
             attrs_mode == AttrsMode::IN_EXTENDED ? "extended" : (attrs_mode == AttrsMode::NATIVE ? "native" : "ignore"),
+            read_only ? "read-only" : "read/write",
             'A' + i,
             drive.get_root().string());
     }

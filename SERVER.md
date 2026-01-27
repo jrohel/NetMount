@@ -20,8 +20,8 @@
 ./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
 [--translit-map-path=<PATH>] [--log-level=<LEVEL>]
-<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]
-[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>]]
+<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]
+[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]]
 
 Options:
   --help                      Display this help
@@ -36,6 +36,7 @@ Options:
   attrs=<storage_method>      File attribute storage method: AUTO, IGNORE, NATIVE, EXTENDED (default: AUTO)
   label=<volume_label>        volume label (first 11 chars used, default: NETMOUNT; use "--label=" to remove)
   name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)
+  readonly=<MODE>             enable read-only sharing: 0 = writable, 1 = read-only (default: writable)
 ```
 
 
@@ -50,11 +51,12 @@ Options:
 
 **Advanced sharing of two directories**
 
-`netmount-server --bind-addr=192.168.200.1 C=/srv/dos_programs,name_conversion=OFF D=/srv/data`
+`netmount-server --bind-addr=192.168.200.1 C=/srv/dos_programs,name_conversion=OFF,readonly=1 D=/srv/data`
 
 - Listens only on IP address `192.168.200.1` using the default port `12200`
 - Filename conversion is enabled only for `D` and disabled for `C` (e.g., "/srv/dos_programs" uses
   a DOS-compatible filesystem with short filenames and is case-insensitive)
+- `C` is shared as read-only
 
 **Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
 

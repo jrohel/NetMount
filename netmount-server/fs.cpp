@@ -316,12 +316,16 @@ int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16
 
 
 int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     auto & item = get_item(handle);
     const auto & fname = item.path;
 
     item.update_last_used_timestamp();
 
-    // READ_ONLY is handled at open time. Do not check it here.
+    // READ_ONLY DOS attribute is handled at open time. Do not check it here.
     // Files opened with CREATE_FILE (create or truncate) must remain writable.
     // Checking it here would wrongly block writes to a newly created/truncated file.
     //if (get_server_path_attrs(fname) & FAT_RO) {
@@ -523,10 +527,16 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
 
 
 void Drive::make_dir(const std::filesystem::path & client_path) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     auto [server_path, exist] = create_server_path(client_path);
+
     if (exist) {
         throw FilesystemError("make_dir: Directory exists: " + server_path.string(), DOS_EXTERR_ACCESS_DENIED);
     }
+
     netmount_srv::make_dir(server_path);
 
     // Recreates directory_list
@@ -535,7 +545,12 @@ void Drive::make_dir(const std::filesystem::path & client_path) {
 
 
 void Drive::delete_dir(const std::filesystem::path & client_path) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     auto [server_path, exist] = create_server_path(client_path);
+
     if (!exist) {
         throw FilesystemError(
             "delete_dir: Directory does not exist: " + server_path.string(), DOS_EXTERR_PATH_NOT_FOUND);
@@ -564,9 +579,14 @@ void Drive::change_dir(const std::filesystem::path & client_path) {
 
 
 void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t attrs) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     const auto attrs_mode = get_attrs_mode();
     if (attrs_mode != AttrsMode::IGNORE) {
         auto [server_path, exist] = create_server_path(client_path);
+
         netmount_srv::set_item_attrs(server_path, attrs, attrs_mode);
 
         // Recreates directory_list
@@ -605,6 +625,10 @@ uint8_t Drive::get_server_path_dos_properties(
 
 
 void Drive::rename_file(const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     const auto [old_server_path, exist1] = create_server_path(old_client_path);
 
     std::filesystem::path new_server_path;
@@ -646,6 +670,10 @@ void Drive::rename_file(const std::filesystem::path & old_client_path, const std
 
 
 void Drive::delete_files(const std::filesystem::path & client_pattern) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     const auto [server_path, exist] = create_server_path(client_pattern);
 
     if (exist) {
@@ -659,6 +687,7 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
                 std::format("Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
                 DOS_EXTERR_ACCESS_DENIED);
         }
+
         netmount_srv::delete_file(server_path);
         return;
     }
@@ -745,6 +774,10 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
 
 
 DosFileProperties Drive::create_or_truncate_file(const std::filesystem::path & server_path, uint8_t attrs) {
+    if (is_read_only()) {
+        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
     return netmount_srv::create_or_truncate_file(server_path, attrs, get_attrs_mode());
 }
 
