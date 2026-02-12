@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2024-2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2024-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "../shared/dos.h"
 #include "../shared/drvproto.h"
@@ -1075,12 +1075,21 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            // invalidate the read buffer if writing to the buffered area of the file
+            // invalidate the read buffer if a write overlaps the buffered region of the file
             if (read_buffer->valid_bytes > 0 && read_buffer->drive_no == reqdrv &&
                 read_buffer->start_cluster == sftptr->start_cluster) {
-                if ((sftptr->file_pos < read_buffer->offset + read_buffer->valid_bytes) &&
-                    (sftptr->file_pos + r->w.cx > read_buffer->offset)) {
-                    read_buffer->valid_bytes = 0;
+                // write affects the currently buffered file
+                if (sftptr->file_pos < read_buffer->offset + read_buffer->valid_bytes) {
+                    // write starts before the end of the buffered region
+                    if (r->w.cx == 0) {
+                        // A zero-length write means "truncate at current offset"
+                        // -> buffered data is no longer valid
+                        read_buffer->valid_bytes = 0;
+                    } else if (sftptr->file_pos + r->w.cx > read_buffer->offset) {
+                        // Write overlaps buffered data
+                        // -> buffered data is no longer valid
+                        read_buffer->valid_bytes = 0;
+                    }
                 }
             }
 
@@ -1343,9 +1352,19 @@ static void handle_request_for_our_drive(void) {
                 struct dos_sft __far * const sft_ptr = MK_FP(r->w.es, r->w.di);
                 struct drive_proto_open_create_reply const * const args =
                     (struct drive_proto_open_create_reply const * const)reply;
+
+                if (subfunction == INT2F_CREATE_FILE ||
+                    (subfunction == INT2F_EXTENDED_OPEN_CREATE_FILE &&
+                     args->result_code == DOS_EXT_OPEN_FILE_RESULT_CODE_TRUNCATED) &&
+                        read_buffer->drive_no == reqdrv && read_buffer->start_cluster == args->start_cluster) {
+                    // invalidate the read buffer when it holds data from a truncated file
+                    read_buffer->valid_bytes = 0;
+                }
+
                 if (subfunction == INT2F_EXTENDED_OPEN_CREATE_FILE) {
                     r->w.cx = args->result_code;
                 }
+
                 if (sft_ptr->open_mode &
                     0x8000U) {  // EtherDFS: if bit 15 is set, then it's a "FCB open", and requires the internal DOS
                                 // "Set FCB Owner" function to be called: TODO FIXME set_sft_owner()
@@ -2384,7 +2403,7 @@ static int umount(struct shared_data __far * shared_data_ptr, uint8_t drive_no) 
 static void print_help(void) {
     my_print_dos_string(
         "NetMount " NETMOUNT_VERSION
-        ", Copyright 2024-2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
+        ", Copyright 2024-2026 Jaroslav Rohel <jaroslav.rohel@gmail.com>\r\n"
         "NetMount comes with ABSOLUTELY NO WARRANTY. This is free software\r\n"
         "and you are welcome to redistribute it under the terms of the GNU GPL v2.\r\n"
         "\r\n"
