@@ -540,9 +540,10 @@ void Drive::delete_dir(const std::filesystem::path & client_path) {
             "delete_dir: Directory does not exist: " + server_path.string(), DOS_EXTERR_PATH_NOT_FOUND);
     }
 
-    if (get_server_path_attrs(server_path) & FAT_RO) {
-        throw FilesystemError("Access denied: Directory has the READ_ONLY attribute", DOS_EXTERR_ACCESS_DENIED);
-    }
+    // DOS ignores the READ-ONLY attribute on directories
+    //if (get_server_path_attrs(server_path) & FAT_RO) {
+    //    throw FilesystemError("Access denied: Directory has the READ_ONLY attribute", DOS_EXTERR_ACCESS_DENIED);
+    //}
 
     netmount_srv::delete_dir(server_path);
 
