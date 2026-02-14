@@ -320,11 +320,14 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
 
     item.update_last_used_timestamp();
 
-    if (get_server_path_attrs(fname) & FAT_RO) {
-        throw FilesystemError(
-            std::format("Access denied: File \"{}\" has the READ_ONLY attribute", fname.string()),
-            DOS_EXTERR_ACCESS_DENIED);
-    }
+    // READ_ONLY is handled at open time. Do not check it here.
+    // Files opened with CREATE_FILE (create or truncate) must remain writable.
+    // Checking it here would wrongly block writes to a newly created/truncated file.
+    //if (get_server_path_attrs(fname) & FAT_RO) {
+    //    throw FilesystemError(
+    //        std::format("Access denied: File \"{}\" has the READ_ONLY attribute", fname.string()),
+    //        DOS_EXTERR_ACCESS_DENIED);
+    //}
 
     // len 0 means "truncate" or "extend"
     if (len == 0) {
