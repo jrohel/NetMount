@@ -798,7 +798,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 DOS_EXTERR_ACCESS_DENIED);
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
-                            if ((result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) && (attr & FAT_RO)) {
+                            if (((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST ||
+                                 (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) &&
+                                (attr & FAT_RO)) {
                                 throw FilesystemError(
                                     std::format(
                                         "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
