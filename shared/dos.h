@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2024 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2024-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #ifndef _DOS_H_
 #define _DOS_H_
@@ -102,6 +102,8 @@
 #define DOS_EXTERR_QUEUE_NOT_FULL              62  // queue not full
 #define DOS_EXTERR_NO_SPACE_TO_PRINT_FILE      63  // not enough space to print file
 #define DOS_EXTERR_NET_NAME_WAS_DELETED        64  // network name was deleted
+
+#define DOS_EXTERR_FILE_ALREADY_EXISTS 80  // File (directory) already exists
 
 // structs are paked
 #pragma pack(push, 1)

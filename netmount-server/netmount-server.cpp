@@ -837,7 +837,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                     std::format(
                                         "EXTENDED_OPEN_CREATE_FILE fail: file \"{}\" already exists",
                                         server_path.string()),
-                                    DOS_EXTERR_ACCESS_DENIED);
+                                    DOS_EXTERR_FILE_ALREADY_EXISTS);
                             }
                         }
                     }
