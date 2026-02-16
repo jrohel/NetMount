@@ -557,26 +557,16 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
 
             uint16_t handle;
             try {
-                const auto [server_directory, exist] = drive.create_server_path(search_template_parent);
-                if (!exist) {
-                    // do not use DOS_EXTERR_FILE_NOT_FOUND, some applications rely on a failing FIND_FIRST
-                    // to return DOS_EXTERR_NO_MORE_FILES (e.g. LapLink 5)
-                    return_code = DOS_EXTERR_NO_MORE_FILES;
-                    log(LogLevel::NOTICE,
-                        "FIND_FIRST: ({}) Directory does not exist: {}\n",
-                        return_code,
-                        search_template_parent.string());
-                    break;
-                }
-                handle = drive.get_handle(server_directory);
-            } catch (const std::runtime_error &) {
-                handle = 0xFFFFU;
+                const auto [server_path, exist] = drive.create_server_path(search_template);
+                handle = drive.get_handle(server_path.parent_path());
+            } catch (const std::runtime_error & ex) {
+                return_code = log_exception_get_dos_err_code(
+                    "FIND_FIRST", reqdrv, search_template_parent.string(), DOS_EXTERR_NO_MORE_FILES, ex);
+                break;
             }
             DosFileProperties properties;
             uint16_t fpos = 0;
             if ((handle == 0xFFFFU) || !drive.find_file(handle, filemaskfcb, fattr, properties, fpos)) {
-                // do not use DOS_EXTERR_FILE_NOT_FOUND, some applications rely on a failing FIND_FIRST
-                // to return DOS_EXTERR_NO_MORE_FILES (e.g. LapLink 5)
                 return_code = DOS_EXTERR_NO_MORE_FILES;
                 log(LogLevel::INFO,
                     "FIND_FIRST: ({}) No matching file found in \"{:c}:\\{}\" filemask: \"{}\" attrs: 0x{:2X}\n",
