@@ -755,13 +755,22 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
                             server_path.string(),
                             stack_attr);
-                        if (std::filesystem::exists(server_path) &&
-                            (drive.get_server_path_attrs(server_path) & FAT_RO)) {
-                            throw FilesystemError(
-                                std::format(
-                                    "Access denied: File \"{}\" already exists and has the READ_ONLY attribute",
-                                    server_path.string()),
-                                DOS_EXTERR_ACCESS_DENIED);
+                        if (std::filesystem::exists(server_path)) {
+                            const auto attr = drive.get_server_path_attrs(server_path);
+                            if (attr & FAT_RO) {
+                                throw FilesystemError(
+                                    std::format(
+                                        "Access denied: File \"{}\" already exists and has the READ_ONLY attribute",
+                                        server_path.string()),
+                                    DOS_EXTERR_ACCESS_DENIED);
+                            }
+                            if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
+                                throw FilesystemError(
+                                    std::format(
+                                        "Access denied: Replace file \"{}\" cannot remove system attribute",
+                                        server_path.string()),
+                                    DOS_EXTERR_ACCESS_DENIED);
+                            }
                         }
                         properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                         result_open_mode = OPEN_MODE_RDWR;
@@ -798,19 +807,32 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 DOS_EXTERR_ACCESS_DENIED);
                         } else {
                             log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
-                            if (((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST ||
-                                 (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) &&
-                                (attr & FAT_RO)) {
-                                throw FilesystemError(
-                                    std::format(
-                                        "Access denied: File \"{}\" has the READ_ONLY attribute", server_path.string()),
-                                    DOS_EXTERR_ACCESS_DENIED);
-                            }
                             if ((action_code & IF_EXIST_MASK) == ACTION_CODE_OPEN_IF_EXIST) {
+                                if ((attr & FAT_RO) && (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) {
+                                    throw FilesystemError(
+                                        std::format(
+                                            "Access denied: Cannot open READ_ONLY file \"{}\" for writing",
+                                            server_path.string()),
+                                        DOS_EXTERR_ACCESS_DENIED);
+                                }
                                 log(LogLevel::DEBUG, "open file\n");
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
                             } else if ((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST) {
-                                log(LogLevel::DEBUG, "truncate file\n");
+                                log(LogLevel::DEBUG, "replace file\n");
+                                if (attr & FAT_RO) {
+                                    throw FilesystemError(
+                                        std::format(
+                                            "Access denied: Cannot replace file \"{}\" with the READ_ONLY attribute",
+                                            server_path.string()),
+                                        DOS_EXTERR_ACCESS_DENIED);
+                                }
+                                if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
+                                    throw FilesystemError(
+                                        std::format(
+                                            "Access denied: Replace file \"{}\" cannot remove system attribute",
+                                            server_path.string()),
+                                        DOS_EXTERR_ACCESS_DENIED);
+                                }
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_TRUNCATED;
                             } else {
