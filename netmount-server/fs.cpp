@@ -606,6 +606,13 @@ uint8_t Drive::get_server_path_dos_properties(
 void Drive::rename_file(const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
     const auto [old_server_path, exist1] = create_server_path(old_client_path);
     const auto [new_server_path, exist2] = create_server_path(new_client_path);
+
+    if (exist2) {
+        throw FilesystemError(
+            std::format("Access denied: Destination file \"{}\" already exists", new_server_path.string()),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     netmount_srv::rename_file(old_server_path, new_server_path);
 
     // Recreates directory_list
