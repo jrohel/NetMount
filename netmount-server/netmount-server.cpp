@@ -745,7 +745,8 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
                             server_path.string(),
                             stack_attr);
-                        if (std::filesystem::exists(server_path)) {
+                        const bool file_exists = std::filesystem::exists(server_path);
+                        if (file_exists) {
                             const auto attr = drive.get_server_path_attrs(server_path);
                             if (attr & FAT_RO) {
                                 throw FilesystemError(
@@ -763,6 +764,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             }
                         }
                         properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
+                        if (!file_exists) {
+                            // Recreates directory_list
+                            drive.create_server_path(relative_path, true);
+                        }
                         result_open_mode = OPEN_MODE_RDWR;
                     } else {
                         log(LogLevel::DEBUG,
@@ -781,6 +786,8 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             if ((action_code & IF_NOT_EXIST_MASK) == ACTION_CODE_CREATE_IF_NOT_EXIST) {
                                 log(LogLevel::DEBUG, "create file\n");
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
+                                // Recreates directory_list
+                                drive.create_server_path(relative_path, true);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_CREATED;
                             } else {
                                 throw FilesystemError(
