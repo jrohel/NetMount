@@ -25,6 +25,7 @@
 #include <exception>
 #include <format>
 #include <string_view>
+#include <tuple>
 
 
 std::strong_ordering operator<=>(const fcb_file_name & lhs, const fcb_file_name & rhs) noexcept {
@@ -605,8 +606,32 @@ uint8_t Drive::get_server_path_dos_properties(
 
 void Drive::rename_file(const std::filesystem::path & old_client_path, const std::filesystem::path & new_client_path) {
     const auto [old_server_path, exist1] = create_server_path(old_client_path);
-    const auto [new_server_path, exist2] = create_server_path(new_client_path);
 
+    std::filesystem::path new_server_path;
+    bool exist2;
+    try {
+        std::tie(new_server_path, exist2) = create_server_path(new_client_path);
+    } catch (const FilesystemError & ex) {
+        if (ex.get_dos_err_code() == DOS_EXTERR_PATH_NOT_FOUND) {
+            // Replace DOS_EXTERR_PATH_NOT_FOUND with DOS_EXTERR_FILE_NOT_FOUND
+            // for compatibility with DOS behavior.
+            //
+            // Technically, PATH_NOT_FOUND would be the correct error,
+            // since the parent directory of the new file does not exist.
+            // However, DOS reports FILE_NOT_FOUND in this situation.
+            //
+            // This DOS behavior appears to be incorrect or at least
+            // inconsistent. Nevertheless, existing applications rely on
+            // the actual DOS behavior, so we preserve it for compatibility.
+            //
+            // We are not expecting the new file to exist. If it already
+            // exists, the rename operation fails later with
+            // DOS_EXTERR_ACCESS_DENIED.
+            throw FilesystemError(
+                std::format("rename_file: Path not found: {}", new_client_path.string()), DOS_EXTERR_FILE_NOT_FOUND);
+        }
+        throw;
+    }
     if (exist2) {
         throw FilesystemError(
             std::format("Access denied: Destination file \"{}\" already exists", new_server_path.string()),
