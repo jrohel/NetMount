@@ -1585,6 +1585,17 @@ int main(int argc, char ** argv) {
                 // fill in header
                 auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.send_packet.data());
                 header->length_flags = to_little16(send_msg_len);
+
+                {
+                    auto * const rcv_header =
+                        reinterpret_cast<struct drive_proto_hdr const *>(reply_info.recv_packet.data());
+                    const unsigned int reqdrv = rcv_header->drive & 0x1F;
+                    if (drives[reqdrv].is_read_only()) {
+                        // Set the information flag: share is read-only
+                        header->length_flags |= to_little16(0x4000);
+                    }
+                }
+
                 if (cksumflag != 0) {
                     const uint16_t checksum = bsd_checksum(
                         &header->checksum + 1,

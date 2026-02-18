@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2024 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2024-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #ifndef _DRVPROTO_H_
 #define _DRVPROTO_H_
@@ -18,7 +18,7 @@
 // little endian
 struct drive_proto_hdr {
     uint8_t version;
-    uint16_t length_flags;  // chechsum_used | unused | unused | unused | unused | length
+    uint16_t length_flags;  // chechsum_used | read-only share | unused | unused | unused | length
     uint16_t checksum;
     uint8_t sequence;
     union {
