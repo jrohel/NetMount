@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define NETMOUNT_VERSION "1.7.0"
+#define NETMOUNT_VERSION "1.7.1"
 
 
 #pragma pack(1)

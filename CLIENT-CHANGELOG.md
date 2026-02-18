@@ -1,3 +1,18 @@
+# 1.7.1 (2026-02-18)
+
+## Fixes
+
+- **fix missing read buffer invalidation on file truncation**
+
+    Invalidate the read buffer if it contains data that was removed by
+    file truncation.
+
+    This can occur when the file is truncated via a write operation with
+    zero-length data or when the file is reopened and replaced with an
+    empty file.
+
+----
+
 # 1.7.0 (2025-11-19)
 
 ## Fixes
