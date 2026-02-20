@@ -174,6 +174,9 @@ public:
     /// Throws exception on error.
     DosFileProperties create_or_truncate_file(const std::filesystem::path & server_path, uint8_t attrs);
 
+    /// Try to open a file, then close it.
+    void try_open_file(const std::filesystem::path & server_path, uint8_t open_mode);
+
     /// Returns filesystem total size and free space in bytes, or 0, 0 on error
     std::pair<uint64_t, uint64_t> space_info();
 

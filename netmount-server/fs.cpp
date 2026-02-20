@@ -24,6 +24,7 @@
 #include <compare>
 #include <exception>
 #include <format>
+#include <fstream>
 #include <string_view>
 #include <tuple>
 
@@ -80,6 +81,8 @@ void change_dir(const std::filesystem::path & dir);
 // Returns properties of created/truncated file.
 // Throws exception on error.
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode);
+
+void try_open_file(const std::filesystem::path & path, uint8_t open_mode);
 
 // Resize file
 // Throws exception on error.
@@ -782,6 +785,11 @@ DosFileProperties Drive::create_or_truncate_file(const std::filesystem::path & s
 }
 
 
+void Drive::try_open_file(const std::filesystem::path & server_path, uint8_t open_mode) {
+    netmount_srv::try_open_file(server_path, open_mode);
+}
+
+
 std::pair<uint64_t, uint64_t> Drive::space_info() {
     const auto & root = get_root();
     if (root.empty()) {
@@ -1166,6 +1174,31 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
     DosFileProperties properties;
     get_path_dos_properties(path, &properties, mode);
     return properties;
+}
+
+
+void try_open_file(const std::filesystem::path & path, uint8_t open_mode) {
+    std::ios::openmode mode;
+    switch (open_mode & 0x03) {  // use only access mode bits, ignore sharing mode
+        case OPEN_MODE_RDONLY:
+            mode = std::ios::in | std::ios::binary;
+            break;
+        case OPEN_MODE_WRONLY:
+            mode = std::ios::in | std::ios::out | std::ios::binary;
+            break;
+        case OPEN_MODE_RDWR:
+            mode = std::ios::in | std::ios::out | std::ios::binary;
+            break;
+        default:
+            throw FilesystemError(
+                std::format("try_open_file: Invalid open mode 0x{:02X}", open_mode), DOS_EXTERR_FUNC_NUM_INVALID);
+    }
+
+    std::fstream file(path, mode);
+
+    if (!file.is_open()) {
+        throw FilesystemError("try_open_file: Cannot open file", DOS_EXTERR_ACCESS_DENIED);
+    }
 }
 
 

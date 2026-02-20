@@ -749,6 +749,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                     DOS_EXTERR_ACCESS_DENIED);
                             }
                         }
+                        drive.try_open_file(server_path, result_open_mode);
                     } else if (function == INT2F_CREATE_FILE) {
                         log(LogLevel::DEBUG,
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
@@ -841,6 +842,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                             DOS_EXTERR_ACCESS_DENIED);
                                     }
                                 }
+                                drive.try_open_file(server_path, result_open_mode);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
                             } else if ((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST) {
                                 log(LogLevel::DEBUG, "replace file\n");
