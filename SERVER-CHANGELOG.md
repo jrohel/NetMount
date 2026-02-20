@@ -1,3 +1,139 @@
+# 1.7.0 (2026-02-20)
+
+## Features
+
+- **Support for read-only shares**
+
+     The server now supports read-only shares. Clients have read-only access to these shares.
+
+     A new shared directory option was introduced:
+
+    `readonly=<MODE>`  enable read-only sharing: 0 = writable, 1 = read-only (default: writable)
+
+    Example usage:
+
+        $ ./netmount-server/netmount-server C=/srv/C,readonly=1 D=/srv/D
+        attrs mode |   access   | drive | path
+        extended   | read-only  |   C   | /srv/C
+        extended   | read/write |   D   | /srv/D
+
+    When a share is configured as read-only, the server adds the read-only share flag
+    to every response header. This change is compatible with existing clients. They
+    ignore this flag, so no functionality is broken. New clients can make use of it.
+
+- **Add macOS build support with DOS attributes in extended attributes**
+
+    Adds macOS-specific Makefile and filesystem implementation that stores
+    DOS attributes (archive, hidden, read-only, system) in extended attributes.
+
+    macOS extended attribute support is adapted from the Linux
+    implementation with platform-specific changes and is currently untested.
+
+## Fixes
+
+- **time_to_fat: Clamp time_t to valid DOS FAT timestamp range**
+
+    Added boundary checks when converting time_t to DOS FAT timestamp.
+    DOS FAT supports times only between 1980-01-01 00:00:00 and
+    2107-12-31 23:59:58. Previously, times outside this range could result
+    in incorrect year values while other fields were correct.
+
+    Now, the year is checked: if it is before 1980, the timestamp is set
+    to the minimum valid FAT time (1980-01-01 00:00:00). If it is after
+    2107, the timestamp is set to the maximum valid FAT time
+    (2107-12-31 23:59:58).
+
+- **Fix symlink handling**
+
+    DOS does not support symlinks. Therefore, the NetMount server follows
+    symlinks and returns what they point to.
+
+    Deleting a symlink deletes the link itself, not its target (file or
+    directory). Deleting a symlink that points to a non-empty directory is not
+    a problem on the server side, and the contents of the target directory are
+    not affected. However, DOS does not recognize symlinks, so DOS or its
+    applications may attempt to be "clever" and refuse to delete a link to a
+    non-empty directory, or even proactively delete the contents of the target
+    directory.
+
+    Before this fix, a problem occurred when a symlink pointed to a nonexistent
+    path (a dangling symlink). When building the directory listing, such a link
+    incorrectly inherited the properties (size, date and time, attributes) of
+    the previous entry. Attempting to delete such a symlink resulted in an
+    unhandled exception (server crash).
+
+    Now, a symlink pointing to a nonexistent file is listed as a zero-size file.
+    Its last modification date is set to 1980-01-01 00:00:00 (the minimum DOS FAT
+    timestamp), and all attributes (ARCHIVE, HIDDEN, READ ONLY, SYSTEM) are
+    cleared. Deletion has been fixed, and the symlink is now removed correctly
+    whether it points to an existing item or not.
+
+    Attempts to create or replace a file where a dangling symlink already exists
+    now return ACCESS_DENIED. Previously, if the parent directory of the symlink
+    target existed but the final component did not, the server could create
+    the target file. Since DOS does not support symlinks, this behavior appeared
+    unintuitive, as a create/replace request could silently create a different
+    file than the one referenced by the client.
+
+- **Improve and unify error handling**
+
+    Numerous changes have been made to error handling.
+    FilesystemError is now used in more places instead of std::runtime_error.
+    Added get_dos_err_code to extract the DOS error code from exceptions, and
+    mapped selected std::filesystem::filesystem_error cases to corresponding
+    DOS error codes.
+    Added log_exception_get_dos_err_code to unify exception logging and
+    error reporting.
+
+    This unification also fixes previously unhandled exceptions.
+
+- **Fix EXTENDED_OPEN_CREATE_FILE to disallow replacing read-only files**
+
+- **Disallow replacing a file if it would remove the system attribute**
+
+    This aligns the behavior with DOS.
+
+- **Fix write_file to not check the read-only attribute**
+
+    The read-only attribute is handled at open time. Files opened with CREATE_FILE
+    (create or truncate) must remain writable. Checking the attribute in write_file
+    would incorrectly block writes to a newly created or truncated file marked
+    as read-only.
+
+- **Ignore read-only attribute on directories**
+
+    Attributes on directories are preserved but not enforced.
+
+    This aligns the behavior with DOS.
+
+- **Sync error codes with MS-DOS**
+
+    Tested which error codes are returned by MS-DOS 5.0, MS-DOS 6.22, and MS-DOS 7.1
+    in various scenarios, and updated the NetMount server to return the same error codes.
+
+- **Refresh directory list after creating new file**
+
+    Required when filename conversion mode is enabled to ensure that
+    subsequent operations can see the newly created file.
+
+- **Verify file can be opened before granting access**
+
+    Added `try_open_file()` helper. `OPEN_FILE` and `EXTENDED_OPEN_CREATE_FILE`
+    operations now call `try_open_file` to attempt opening the existing file
+    in the requested mode.
+
+    Previously, there were cases where DOS attributes allowed access but
+    server-side file permissions did not. `OPEN_FILE` and `EXTENDED_OPEN_CREATE_FILE`
+    could incorrectly report success even when the requested mode was not
+    permitted by the server.
+
+    Example: a request to open a file for read/write could succeed in these
+    operations even if the server allowed read-only access. This caused
+    subsequent writes to fail, and reads could erroneously succeed even though
+    the file should not have been openable.
+
+----
+
 # 1.6.0 (2025-10-12)
 
 ## Features
