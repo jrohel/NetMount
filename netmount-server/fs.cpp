@@ -159,6 +159,20 @@ uint32_t time_to_fat(time_t t) {
     return res;
 }
 
+
+bool is_dangling_symlink(const std::filesystem::path & p) {
+    std::error_code ec;
+    if (!std::filesystem::is_symlink(p, ec)) {
+        return false;
+    }
+
+    if (!std::filesystem::exists(p, ec)) {
+        return true;
+    }
+
+    return false;
+}
+
 }  // namespace
 
 
@@ -295,6 +309,10 @@ int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16
 
     item.update_last_used_timestamp();
 
+    if (is_dangling_symlink(fname)) {
+        throw FilesystemError("read_file: Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
+
 #ifdef _WIN32
     auto * const fd = _wfopen(fname.c_str(), L"rb");
 #else
@@ -327,6 +345,10 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
     const auto & fname = item.path;
 
     item.update_last_used_timestamp();
+
+    if (is_dangling_symlink(fname)) {
+        throw FilesystemError("read_file: Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
 
     // READ_ONLY DOS attribute is handled at open time. Do not check it here.
     // Files opened with CREATE_FILE (create or truncate) must remain writable.
@@ -537,7 +559,7 @@ void Drive::make_dir(const std::filesystem::path & client_path) {
     auto [server_path, exist] = create_server_path(client_path);
 
     if (exist) {
-        throw FilesystemError("make_dir: Directory exists: " + server_path.string(), DOS_EXTERR_ACCESS_DENIED);
+        throw FilesystemError("make_dir: Path exists: " + server_path.string(), DOS_EXTERR_ACCESS_DENIED);
     }
 
     netmount_srv::make_dir(server_path);
@@ -718,7 +740,7 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
         // If file name conversion is turned off, we traverse the file system directly.
         for (const auto & dentry : std::filesystem::directory_iterator(directory)) {
             if (dentry.is_directory()) {
-                // skip directories
+                // skip directories and symlinks to directories
                 continue;
             }
 
@@ -1070,12 +1092,6 @@ uint8_t get_path_dos_properties(
     const std::filesystem::path & path, DosFileProperties * properties, [[maybe_unused]] AttrsMode mode) {
     std::error_code ec;
     uint8_t attrs = std::filesystem::is_directory(path, ec) ? FAT_DIRECTORY : 0;
-    if (ec) {
-        // It may be a symlink pointing to a nonexistent path
-        if (!std::filesystem::is_symlink(path, ec)) {
-            return FAT_ERROR_ATTR;  // error (is not a symlink, probably the path doesn't exist)
-        }
-    }
 
     if (properties) {
         // set file fcbname to the file part of path (ignore traling directory separators)
@@ -1114,10 +1130,6 @@ uint8_t get_path_dos_properties(
         }
     }
 
-    if (ec) {
-        return attrs;
-    }
-
     try {
         attrs |= get_item_attrs(path, mode);
         if (properties) {
@@ -1136,6 +1148,11 @@ void set_item_attrs(
     [[maybe_unused]] const std::filesystem::path & path,
     [[maybe_unused]] uint8_t attrs,
     [[maybe_unused]] AttrsMode mode) {
+    if (is_dangling_symlink(path)) {
+        throw FilesystemError(
+            "set_item_attrs: Access denied: Dangling symlink: " + path.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
+
 #if DOS_ATTRS_NATIVE == 1
     if (mode == AttrsMode::NATIVE) {
         set_dos_attrs_native(path, attrs);
@@ -1151,6 +1168,10 @@ void set_item_attrs(
 
 
 uint8_t get_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[maybe_unused]] AttrsMode mode) {
+    if (is_dangling_symlink(path)) {
+        return 0;
+    }
+
 #if DOS_ATTRS_NATIVE == 1
     if (mode == AttrsMode::NATIVE) {
         return get_dos_attrs_native(path);
@@ -1168,6 +1189,9 @@ uint8_t get_item_attrs([[maybe_unused]] const std::filesystem::path & path, [[ma
 
 
 void make_dir(const std::filesystem::path & dir) {
+    if (is_dangling_symlink(dir)) {
+        throw FilesystemError("make_dir: Dangling symlink - not directory: " + dir.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
     if (!std::filesystem::create_directory(dir)) {
         throw FilesystemError("make_dir: Directory exists: " + dir.string(), DOS_EXTERR_ACCESS_DENIED);
     }
@@ -1175,6 +1199,10 @@ void make_dir(const std::filesystem::path & dir) {
 
 
 void delete_dir(const std::filesystem::path & dir) {
+    if (is_dangling_symlink(dir)) {
+        throw FilesystemError(
+            "delete_dir: Dangling symlink - not directory: " + dir.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
     if (!std::filesystem::exists(dir)) {
         throw FilesystemError("delete_dir: Directory does not exist: " + dir.string(), DOS_EXTERR_PATH_NOT_FOUND);
     }
@@ -1185,10 +1213,20 @@ void delete_dir(const std::filesystem::path & dir) {
 }
 
 
-void change_dir(const std::filesystem::path & dir) { std::filesystem::current_path(dir); }
+void change_dir(const std::filesystem::path & dir) {
+    if (is_dangling_symlink(dir)) {
+        throw FilesystemError(
+            "change_dir: Dangling symlink - not directory: " + dir.string(), DOS_EXTERR_PATH_NOT_FOUND);
+    }
+    std::filesystem::current_path(dir);
+}
 
 
 DosFileProperties create_or_truncate_file(const std::filesystem::path & path, uint8_t attrs, AttrsMode mode) {
+    if (is_dangling_symlink(path)) {
+        throw FilesystemError("create_or_truncate_file: Dangling symlink: " + path.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
+
     // try to create/truncate the file
 #ifdef _WIN32
     auto * const fd = _wfopen(path.c_str(), L"wb");
@@ -1220,6 +1258,10 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
 
 
 void try_open_file(const std::filesystem::path & path, uint8_t open_mode) {
+    if (is_dangling_symlink(path)) {
+        throw FilesystemError("try_open_file: Dangling symlink: " + path.string(), DOS_EXTERR_ACCESS_DENIED);
+    }
+
     std::ios::openmode mode;
     switch (open_mode & 0x03) {  // use only access mode bits, ignore sharing mode
         case OPEN_MODE_RDONLY:
