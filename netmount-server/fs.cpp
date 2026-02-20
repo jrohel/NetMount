@@ -776,16 +776,58 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
 }
 
 
-DosFileProperties Drive::create_or_truncate_file(const std::filesystem::path & server_path, uint8_t attrs) {
+DosFileProperties Drive::create_or_truncate_file(
+    const std::filesystem::path & server_path, uint8_t requested_attrs, uint8_t current_attrs) {
     if (is_read_only()) {
         throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
     }
 
-    return netmount_srv::create_or_truncate_file(server_path, attrs, get_attrs_mode());
+    if (current_attrs != FAT_ERROR_ATTR) {
+        if ((current_attrs & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
+            throw FilesystemError(
+                std::format("{}: Item \"{}\" is either a DIR or a VOL", __func__, server_path.string()),
+                DOS_EXTERR_ACCESS_DENIED);
+        }
+        if (current_attrs & FAT_RO) {
+            throw FilesystemError(
+                std::format(
+                    "{}: Cannot replace file \"{}\" with the READ_ONLY attribute", __func__, server_path.string()),
+                DOS_EXTERR_ACCESS_DENIED);
+        }
+        if ((current_attrs & FAT_SYSTEM) && !(requested_attrs & FAT_SYSTEM)) {
+            throw FilesystemError(
+                std::format(
+                    "{}: Access denied: Replace file \"{}\" cannot remove system attribute",
+                    __func__,
+                    server_path.string()),
+                DOS_EXTERR_ACCESS_DENIED);
+        }
+    }
+
+    return netmount_srv::create_or_truncate_file(server_path, requested_attrs, get_attrs_mode());
 }
 
 
-void Drive::try_open_file(const std::filesystem::path & server_path, uint8_t open_mode) {
+void Drive::try_open_file(const std::filesystem::path & server_path, uint8_t open_mode, uint8_t current_attrs) {
+    if (is_read_only() && (open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) {
+        throw FilesystemError(
+            std::string(__func__) + ": Cannot open file for write - Drive is read-only",
+            DOS_EXTERR_DISK_WRITE_PROTECTED);
+    }
+
+    if ((current_attrs & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
+        throw FilesystemError(
+            std::format("{}: Item \"{}\" is either a DIR or a VOL", __func__, server_path.string()),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
+    if ((current_attrs & FAT_RO) && (open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR))) {
+        throw FilesystemError(
+            std::format(
+                "{}: Cannot open file \"{}\" with the READ_ONLY attribute for writing", __func__, server_path.string()),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     netmount_srv::try_open_file(server_path, open_mode);
 }
 

@@ -731,55 +731,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                 std::format("OPEN_FILE: Cannot get attributes for \"{}\"", server_path.string()),
                                 DOS_EXTERR_FILE_NOT_FOUND);
                         }
-                        if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
-                            throw FilesystemError(
-                                std::format("OPEN_FILE: Item \"{}\" is either a DIR or a VOL", server_path.string()),
-                                DOS_EXTERR_ACCESS_DENIED);
-                        }
-                        if (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) {
-                            if (drive.is_read_only()) {
-                                throw FilesystemError(
-                                    "OPEN_FILE: Access denied: Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
-                            }
-                            if (attr & FAT_RO) {
-                                throw FilesystemError(
-                                    std::format(
-                                        "OPEN_FILE: Access denied: File \"{}\" has the READ_ONLY attribute",
-                                        server_path.string()),
-                                    DOS_EXTERR_ACCESS_DENIED);
-                            }
-                        }
-                        drive.try_open_file(server_path, result_open_mode);
+                        drive.try_open_file(server_path, result_open_mode, attr);
                     } else if (function == INT2F_CREATE_FILE) {
                         log(LogLevel::DEBUG,
                             "CREATE_FILE \"{}\", stack_attr=0x{:04X}\n",
                             server_path.string(),
                             stack_attr);
-                        if (drive.is_read_only()) {
-                            throw FilesystemError(
-                                "CREATE_FILE: Access denied: Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
-                        }
                         const bool file_exists = std::filesystem::exists(server_path);
-                        if (file_exists) {
-                            const auto attr = drive.get_server_path_attrs(server_path);
-                            if (attr & FAT_RO) {
-                                throw FilesystemError(
-                                    std::format(
-                                        "CREATE_FILE: Access denied: File \"{}\" already exists and has the READ_ONLY "
-                                        "attribute",
-                                        server_path.string()),
-                                    DOS_EXTERR_ACCESS_DENIED);
-                            }
-                            if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
-                                throw FilesystemError(
-                                    std::format(
-                                        "CREATE_FILE: Access denied: Replace file \"{}\" cannot remove system "
-                                        "attribute",
-                                        server_path.string()),
-                                    DOS_EXTERR_ACCESS_DENIED);
-                            }
-                        }
-                        properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
+                        const uint8_t attr = file_exists ? drive.get_server_path_attrs(server_path) : FAT_ERROR_ATTR;
+                        properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF, attr);
                         if (!file_exists) {
                             // Recreates directory_list
                             drive.create_server_path(relative_path, true);
@@ -795,18 +755,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                             ext_open_create_open_mode);
 
                         const auto attr = drive.get_server_path_dos_properties(server_path, &properties);
-                        result_open_mode =
-                            ext_open_create_open_mode & 0x7f;  // etherdfs says: that's what PHANTOM.C does
-                        if (attr == FAT_ERROR_ATTR) {          // file not found
+                        result_open_mode = ext_open_create_open_mode & 0x7f;  // Why 0x7F? PHANTOM.C does it too
+                        if (attr == FAT_ERROR_ATTR) {                         // file not found
                             log(LogLevel::DEBUG, "File doesn't exist -> ");
                             if ((action_code & IF_NOT_EXIST_MASK) == ACTION_CODE_CREATE_IF_NOT_EXIST) {
                                 log(LogLevel::DEBUG, "create file\n");
-                                if (drive.is_read_only()) {
-                                    throw FilesystemError(
-                                        "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
-                                        DOS_EXTERR_DISK_WRITE_PROTECTED);
-                                }
-                                properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
+                                properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF, attr);
                                 // Recreates directory_list
                                 drive.create_server_path(relative_path, true);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_CREATED;
@@ -817,57 +771,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                         server_path.string()),
                                     DOS_EXTERR_FILE_NOT_FOUND);
                             }
-                        } else if ((attr & (FAT_VOLUME | FAT_DIRECTORY)) != 0) {
-                            throw FilesystemError(
-                                std::format(
-                                    "EXTENDED_OPEN_CREATE_FILE: Item \"{}\" is either a DIR or a VOL",
-                                    server_path.string()),
-                                DOS_EXTERR_ACCESS_DENIED);
                         } else {
-                            log(LogLevel::DEBUG, "File exists already (attr 0x{:02X}) -> ", attr);
+                            log(LogLevel::DEBUG, "Path exists already (attr 0x{:02X}) -> ", attr);
                             if ((action_code & IF_EXIST_MASK) == ACTION_CODE_OPEN_IF_EXIST) {
                                 log(LogLevel::DEBUG, "open file\n");
-                                if (result_open_mode & (OPEN_MODE_WRONLY | OPEN_MODE_RDWR)) {
-                                    if (drive.is_read_only()) {
-                                        throw FilesystemError(
-                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
-                                            DOS_EXTERR_DISK_WRITE_PROTECTED);
-                                    }
-                                    if (attr & FAT_RO) {
-                                        throw FilesystemError(
-                                            std::format(
-                                                "EXTENDED_OPEN_CREATE_FILE: Access denied: Cannot open READ_ONLY file "
-                                                "\"{}\" for writing",
-                                                server_path.string()),
-                                            DOS_EXTERR_ACCESS_DENIED);
-                                    }
-                                }
-                                drive.try_open_file(server_path, result_open_mode);
+                                drive.try_open_file(server_path, result_open_mode, attr);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_OPENED;
                             } else if ((action_code & IF_EXIST_MASK) == ACTION_CODE_REPLACE_IF_EXIST) {
                                 log(LogLevel::DEBUG, "replace file\n");
-                                if (drive.is_read_only()) {
-                                    throw FilesystemError(
-                                        "EXTENDED_OPEN_CREATE_FILE: Access denied: Drive is read-only",
-                                        DOS_EXTERR_DISK_WRITE_PROTECTED);
-                                }
-                                if (attr & FAT_RO) {
-                                    throw FilesystemError(
-                                        std::format(
-                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Cannot replace file \"{}\" with "
-                                            "the READ_ONLY attribute",
-                                            server_path.string()),
-                                        DOS_EXTERR_ACCESS_DENIED);
-                                }
-                                if ((attr & FAT_SYSTEM) && !(stack_attr & FAT_SYSTEM)) {
-                                    throw FilesystemError(
-                                        std::format(
-                                            "EXTENDED_OPEN_CREATE_FILE: Access denied: Replace file \"{}\" cannot "
-                                            "remove system attribute",
-                                            server_path.string()),
-                                        DOS_EXTERR_ACCESS_DENIED);
-                                }
-                                properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF);
+                                properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF, attr);
                                 ext_open_create_result_code = DOS_EXT_OPEN_FILE_RESULT_CODE_TRUNCATED;
                             } else {
                                 throw FilesystemError(
