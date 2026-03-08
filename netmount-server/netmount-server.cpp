@@ -1325,6 +1325,7 @@ int main(int argc, char ** argv) {
             'A' + i,
             drive.get_root().string());
     }
+    std::fflush(stdout);
 
     if (is_file_name_conversion_active && !transliteration_map_path.empty()) {
         try {
