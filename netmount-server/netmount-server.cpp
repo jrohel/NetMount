@@ -878,6 +878,8 @@ void dump_packet(const unsigned char * frame, int len) {
 
         print(stderr, "\n");
     }
+
+    std::fflush(stderr);
 }
 
 

@@ -22,6 +22,7 @@ void log(LogLevel level, const std::string & message) {
         LOG_LEVEL_C_STR[static_cast<int>(level)],
         message);
     std::fputs(formatted_message.c_str(), stderr);
+    std::fflush(stderr);
 }
 
 }  // namespace detail
