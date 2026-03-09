@@ -408,30 +408,33 @@ int32_t Drive::get_file_size(uint16_t handle) {
 bool Drive::find_file(
     uint16_t handle, const fcb_file_name & tmpl, unsigned char attr, DosFileProperties & properties, uint16_t & nth) {
 
-    if (nth == 0 && attr == FAT_VOLUME) {
+    if (attr == FAT_VOLUME) {
         // Handle volume label directly; no need to process directory list.
+        if (nth == 0) {
+            if (!has_volume_label) {
+                log(LogLevel::DEBUG, "find_file: Drive has no volume label\n");
+                return false;
+            }
+            if (!match_fcb_name_to_mask(tmpl, volume_label)) {
+                log(LogLevel::DEBUG, "find_file: Drive volume label does not match mask\n");
+                return false;
+            }
 
-        if (!has_volume_label) {
-            log(LogLevel::DEBUG, "find_file: Drive has no volume label\n");
+            properties.fcb_name = volume_label;
+            properties.attrs = FAT_VOLUME;
+            properties.size = 0;
+            properties.time_date = 0;
+
+            log(LogLevel::DEBUG,
+                "find_file: Found volume label: {:.8s}{:.3s}\n",
+                reinterpret_cast<const char *>(volume_label.name_blank_padded),
+                reinterpret_cast<const char *>(volume_label.ext_blank_padded));
+
+            nth = 1;
+            return true;
+        } else {
             return false;
         }
-        if (!match_fcb_name_to_mask(tmpl, volume_label)) {
-            log(LogLevel::DEBUG, "find_file: Drive volume label does not match mask\n");
-            return false;
-        }
-
-        properties.fcb_name = volume_label;
-        properties.attrs = FAT_VOLUME;
-        properties.size = 0;
-        properties.time_date = 0;
-
-        log(LogLevel::DEBUG,
-            "find_file: Found volume label: {:.8s}{:.3s}\n",
-            reinterpret_cast<const char *>(volume_label.name_blank_padded),
-            reinterpret_cast<const char *>(volume_label.ext_blank_padded));
-
-        nth = 1;
-        return true;
     }
 
     auto & item = get_item(handle);
@@ -464,18 +467,13 @@ bool Drive::find_file(
     for (n = nth; n < item_count; ++n) {
         const auto & item_props = dir_list[n];
 
-        if (!match_fcb_name_to_mask(tmpl, item_props.fcb_name))
+        if (!match_fcb_name_to_mask(tmpl, item_props.fcb_name)) {
             continue;
+        }
 
-        if (attr == FAT_VOLUME) {
-            // look only for VOLUME -> skip if not VOLUME
-            if ((item_props.attrs & FAT_VOLUME) == 0) {
-                continue;
-            }
-        } else {
-            // return only file with at most the specified combination of hidden, system, and directory attributes
-            if ((attr | (item_props.attrs & (FAT_HIDDEN | FAT_SYSTEM | FAT_VOLUME | FAT_DIRECTORY))) != attr)
-                continue;
+        // return only file with at most the specified combination of hidden, system, and directory attributes
+        if ((attr | (item_props.attrs & (FAT_HIDDEN | FAT_SYSTEM | FAT_VOLUME | FAT_DIRECTORY))) != attr) {
+            continue;
         }
 
         found_props = &item_props;
