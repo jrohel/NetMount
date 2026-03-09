@@ -1142,7 +1142,6 @@ int main(int argc, char ** argv) {
     std::string slip_dev;
     uint32_t slip_speed{0};
     bool slip_hw_flow_control{false};
-    unsigned char cksumflag;
     std::filesystem::path transliteration_map_path = TRANSLITERATION_MAP_FILE;
 
     for (int i = 1; i < argc; ++i) {
@@ -1415,7 +1414,7 @@ int main(int argc, char ** argv) {
                 continue;
             }
 
-            cksumflag = from_little16(header->length_flags) >> 15;
+            const bool checksum_present = from_little16(header->length_flags) & DRIVE_PROTO_FLAG_CHECKSUM_USED;
 
             const uint16_t length_from_header = from_little16(header->length_flags) & 0x7FF;
             if (length_from_header < sizeof(struct drive_proto_hdr)) {
@@ -1443,7 +1442,7 @@ int main(int argc, char ** argv) {
             log(LogLevel::DEBUG,
                 "Received packet of {} bytes (cksum = {})\n",
                 request_packet_len,
-                (cksumflag != 0) ? "ENABLED" : "DISABLED");
+                (checksum_present) ? "ENABLED" : "DISABLED");
             if (global_log_level >= LogLevel::TRACE) {
                 dump_packet(request_packet, request_packet_len);
             }
@@ -1457,7 +1456,7 @@ int main(int argc, char ** argv) {
 #endif
 
             // check the checksum, if any
-            if (cksumflag != 0) {
+            if (checksum_present) {
                 const uint16_t cksum_mine = bsd_checksum(
                     &header->checksum + 1,
                     request_packet_len - (reinterpret_cast<const uint8_t *>(&header->checksum + 1) -
@@ -1509,17 +1508,17 @@ int main(int argc, char ** argv) {
                     const unsigned int reqdrv = rcv_header->drive & 0x1F;
                     if (drives[reqdrv].is_read_only()) {
                         // Set the information flag: share is read-only
-                        header->length_flags |= to_little16(0x4000);
+                        header->length_flags |= to_little16(DRIVE_PROTO_FLAG_RO_SHARE);
                     }
                 }
 
-                if (cksumflag != 0) {
+                if (checksum_present) {
                     const uint16_t checksum = bsd_checksum(
                         &header->checksum + 1,
                         send_msg_len -
                             (reinterpret_cast<uint8_t *>(&header->checksum + 1) - reinterpret_cast<uint8_t *>(header)));
                     header->checksum = to_little16(checksum);
-                    header->length_flags |= to_little16(0x8000);  // set the checksum flag
+                    header->length_flags |= to_little16(DRIVE_PROTO_FLAG_CHECKSUM_USED);  // set the checksum flag
                 } else {
                     header->checksum = to_little16(DRIVE_PROTO_MAGIC);
                     header->length_flags &= to_little16(0x7FFF);  // zero the checksum flag

@@ -11,9 +11,11 @@
 // structs are packed
 #pragma pack(push, 1)
 
-#define DRIVE_PROTO_VERSION  1
-#define DRIVE_PROTO_MAGIC    0x9524U
-#define DRIVE_PROTO_UDP_PORT 12200
+#define DRIVE_PROTO_VERSION            1
+#define DRIVE_PROTO_MAGIC              0x9524U
+#define DRIVE_PROTO_UDP_PORT           12200
+#define DRIVE_PROTO_FLAG_CHECKSUM_USED 0x8000U
+#define DRIVE_PROTO_FLAG_RO_SHARE      0x4000U
 
 // little endian
 struct drive_proto_hdr {

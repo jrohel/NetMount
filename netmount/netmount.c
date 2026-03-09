@@ -688,7 +688,7 @@ static uint16_t send_request(
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
     if (drv_info->enabled_checksums & CHECKSUM_NETMOUNT_PROTO) {
-        snd_drive_proto->length_flags |= 0x8000U;  // switch checksum on
+        snd_drive_proto->length_flags |= DRIVE_PROTO_FLAG_CHECKSUM_USED;  // switch checksum on
         snd_drive_proto->checksum = bsd_checksum(
             (uint8_t *)(&snd_drive_proto->checksum + 1),
             len - ((uint8_t *)(&snd_drive_proto->checksum + 1) - (uint8_t *)snd_drive_proto));
@@ -752,7 +752,7 @@ static uint16_t send_request(
                 goto ignore_frame;
             }
 
-            if (rcv_drive_proto->length_flags & 0x8000U) {
+            if (rcv_drive_proto->length_flags & DRIVE_PROTO_FLAG_CHECKSUM_USED) {
                 // the received data contains a checksum
                 // if enabled, check the received checksum
                 if ((drv_info->enabled_checksums & CHECKSUM_NETMOUNT_PROTO) &&
