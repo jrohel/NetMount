@@ -897,6 +897,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             }
         } break;
 
+        case INT2F_NETMOUNT_FEATURE_QUERY: {
+            if (request_data_len != sizeof(drive_proto_netmount_feature)) {
+                return -1;
+            }
+
+            // Always returns 0; this server does not implement additional features.
+            return_code = 0;
+        } break;
+
         default:  // unknown query - ignore
             return -1;
     }

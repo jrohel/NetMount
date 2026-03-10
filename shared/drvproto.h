@@ -156,6 +156,11 @@ struct drive_proto_seek_from_end_reply {
     uint16_t position_hi;
 };
 
+
+struct drive_proto_netmount_feature {
+    uint16_t feature_id;
+};
+
 #pragma pack(pop)
 
 #endif
