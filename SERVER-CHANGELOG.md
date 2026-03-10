@@ -1,3 +1,94 @@
+# 1.8.0 (2026-03-12)
+
+## Features
+
+- **Support setting file last-write timestamp on close**
+
+    Allow client to provide requested timestamp when closing a file.
+    Timestamp is applied only if `client_timestamp` is enabled.
+
+    A new shared directory option was introduced:
+    `client_timestamp=<ENABLED>` use client timestamp if present: `0` = `OFF`, `1` = `ON` (default: `ON`)
+
+    Introduce new `DRIVE_PROTO_EXT_FEATURES_FLAG` in the NetMount protocol
+    header. Clients set this flag to indicate that a specific `CLOSE_FILE`
+    request is extended and contains the timestamp. The server sets this
+    flag in the `CLOSE_FILE` reply when `client_timestamp` is enabled.
+
+- **Improve disk info precision with smaller sector sizes**
+
+    The server previously reported total and free space using fixed 32 KiB sectors.
+
+    Now it chooses the smallest sector size that is a power of 512 bytes (512,
+    1024, 2048, etc.), capped at 32 KiB. This change allows more accurate disk
+    space reporting on small drives.
+
+- **Add support for DISK_INFO_LARGE request (up to 256 TiB)**
+
+    Original `DISK_INFO` request is limited to 2 GiB - 32 KiB due to
+    16-bit total_clusters and available_clusters fields.
+
+    `DISK_INFO_LARGE` is a newly added request in DOS network redirectors,
+    supported by newer DOS implementations (e.g., FreeDOS Kernel 2044 /
+    version 2.44, 2026). It uses 32-bit total_clusters and available_clusters,
+    allowing reporting of disks up to 256 TiB - 64 KiB. Original `DISK_INFO`
+    behavior remains unchanged
+
+- **Add support for NETMOUNT_FEATURE_QUERY**
+
+    Server now supports the `NETMOUNT_FEATURE_QUERY` request, allowing
+    clients to query if a specific NetMount feature is supported.
+    This enables future extension of server services while preserving
+    existing behavior.
+
+- **Set DRIVE_PROTO_FLAG_EXTENDED_FORMAT in responses**
+
+    Setting this flag in responses indicates that the server supports
+    `NETMOUNT_FEATURE_QUERY`, as well as the extended `CLOSE_FILE` and
+    `DISK_INFO_LARGE` operations.
+
+    This informs clients that they can make use of the server’s
+    extended features.
+
+    Note:
+    If file client timestamps are ignored (client timestamps are disabled
+    in the server configuration), the `CLOSE_FILE` reply will clear this
+    flag. In all other responses, the flag remain`s set
+
+## Other
+
+- **Flush stdout after printing status table**
+
+- **Flush stderr after each log message and dump packet**
+
+- **Optimize volume label handling**
+
+    Requests for volume labels are handled directly without generating
+    a directory list. However, if the client called find_next, the server
+    would still iterate over the old directory list unnecessarily, even
+    though it would not return any more results.
+
+    Now, the unnecessary iteration is not performed.
+
+- **Define and use DRIVE_PROTO_FLAG_CHECKSUM_USED, DRIVE_PROTO_FLAG_RO_SHARE**
+
+    Defining and using these constants in the code is better than relying on magic numbers.
+
+- **help: add missing attrs for repeated drives**
+
+- **Adjust priorities of log messages**
+
+    Update the priority of several log messages. The NetMount server
+    supports configurable logging verbosity, and these changes make
+    the output more useful at different log levels.
+
+- **Improve log/exception messages and use `__func__`**
+
+    Minor adjustments to log and exception messages, replacing
+    manual function name strings with the standard `__func__` variable.
+
+----
+
 # 1.7.0 (2026-02-20)
 
 ## Features
@@ -8,7 +99,7 @@
 
      A new shared directory option was introduced:
 
-    `readonly=<MODE>`  enable read-only sharing: 0 = writable, 1 = read-only (default: writable)
+    `readonly=<MODE>`  enable read-only sharing: `0` = `writable`, `1` = `read-only` (default: `writable`)
 
     Example usage:
 
