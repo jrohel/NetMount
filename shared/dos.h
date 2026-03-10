@@ -29,6 +29,7 @@
 #define INT2F_SEEK_FROM_END             0x21
 #define INT2F_EXTENDED_ATTRS            0x2D
 #define INT2F_EXTENDED_OPEN_CREATE_FILE 0x2E
+#define INT2F_DISK_INFO_LARGE           0xA3  // Redirector function for disks larger than 2 GiB
 #define INT2F_UNUSED                    0xFF
 
 

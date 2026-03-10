@@ -469,6 +469,44 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             }
         } break;
 
+        case INT2F_DISK_INFO_LARGE: {
+            if (request_data_len != 0) {
+                return -1;
+            }
+            log(LogLevel::DEBUG, "DISK_INFO_LARGE for drive {:c}:\n", 'A' + reqdrv);
+            try {
+                auto [fs_size, free_space] = drive.space_info();
+
+                // limit results to slightly less than 256 TiB
+                if (fs_size > 0xFFFFFFFFUL * 0xFFFFU)
+                    fs_size = 0xFFFFFFFFUL * 0xFFFFU;
+                if (free_space > 0xFFFFFFFFUL * 0xFFFFU)
+                    free_space = 0xFFFFFFFFUL * 0xFFFFU;
+
+                // Use sector size 512 bytes
+                uint16_t bytes_per_sector = 512;
+                uint64_t total_sectors = fs_size / bytes_per_sector;
+                uint64_t free_sectors = free_space / bytes_per_sector;
+
+                // Increase sector size until total sectors fit in 32-bit integer
+                while (total_sectors > 0xFFFFFFFFUL) {
+                    bytes_per_sector *= 2;
+                    total_sectors /= 2;
+                    free_sectors /= 2;
+                }
+
+                log(LogLevel::DEBUG, "  TOTAL: {} KiB ; FREE: {} KiB\n", fs_size >> 10, free_space >> 10);
+                auto * const reply = reinterpret_cast<drive_proto_disk_info_large_reply *>(reply_data);
+                reply->total_clusters = to_little32(total_sectors);
+                reply->bytes_per_sector = to_little16(bytes_per_sector);
+                reply->available_clusters = to_little32(free_sectors);
+                reply_packet_len = sizeof(drive_proto_disk_info_large_reply);
+            } catch (const std::runtime_error & ex) {
+                return_code = DOS_EXTERR_ACCESS_DENIED;
+                log(LogLevel::WARNING, "DISK_INFO_LARGE drive {:c}: ({}) {}\n", reqdrv + 'A', return_code, ex.what());
+            }
+        } break;
+
         case INT2F_SET_ATTRS: {
             if (request_data_len <= sizeof(drive_proto_set_attrs)) {
                 return -1;

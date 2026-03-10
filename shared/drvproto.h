@@ -79,6 +79,13 @@ struct drive_proto_disk_info_reply {
 };
 
 
+struct drive_proto_disk_info_large_reply {
+    uint32_t total_clusters;
+    uint16_t bytes_per_sector;
+    uint32_t available_clusters;
+};
+
+
 struct drive_proto_set_attrs {
     uint8_t attrs;
 };
