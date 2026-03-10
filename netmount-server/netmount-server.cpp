@@ -238,6 +238,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         }
     }
 
+    const bool extended_request = from_little16(request_header->length_flags) & DRIVE_PROTO_FLAG_EXTENDED_FEATURES;
+    bool extended_features_flag_in_reply = false;
+
     *reply_header = *request_header;
 
     auto const * const request_data = reinterpret_cast<const uint8_t *>(request_header + 1);
@@ -315,15 +318,29 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         }
 
         case INT2F_CLOSE_FILE: {
-            if (request_data_len != sizeof(drive_proto_closef)) {
-                return -1;
-            }
-            // Only checking the existence of the handle because I don't keep files open.
-            auto * const request = reinterpret_cast<const drive_proto_closef *>(request_data);
-            const uint16_t handle = from_little16(request->start_cluster);
-            log(LogLevel::DEBUG, "CLOSE_FILE handle {}\n", handle);
+            uint16_t handle;
+            extended_features_flag_in_reply = drive.get_use_client_timestamp();
             try {
-                drive.get_handle_path(handle);
+                if (extended_request) {
+                    if (request_data_len != sizeof(drive_proto_closef_ext)) {
+                        return -1;
+                    }
+                    // Write new last modofication time.
+                    auto * const request = reinterpret_cast<const drive_proto_closef_ext *>(request_data);
+                    handle = from_little16(request->start_cluster);
+                    const uint32_t date_time = from_little32(request->date_time);
+                    log(LogLevel::DEBUG, "CLOSE_FILE extended handle {}, date_time {:04X}\n", handle, date_time);
+                    drive.set_file_date_time(handle, date_time);
+                } else {
+                    if (request_data_len != sizeof(drive_proto_closef)) {
+                        return -1;
+                    }
+                    // Only checking the existence of the handle because I don't keep files open.
+                    auto * const request = reinterpret_cast<const drive_proto_closef *>(request_data);
+                    handle = from_little16(request->start_cluster);
+                    log(LogLevel::DEBUG, "CLOSE_FILE handle {}\n", handle);
+                    drive.get_handle_path(handle);
+                }
             } catch (const std::runtime_error & ex) {
                 // TODO: Send error to client?
                 return_code = log_exception_get_dos_err_code("CLOSE_FILE", reqdrv, handle, DOS_EXTERR_NO_ERROR, ex);
@@ -831,6 +848,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             return -1;
     }
 
+    reply_header->length_flags = extended_features_flag_in_reply ? DRIVE_PROTO_FLAG_EXTENDED_FEATURES : 0;
     reply_header->ax = to_little16(return_code);
 
     return reply_packet_len + sizeof(struct drive_proto_hdr);
@@ -923,8 +941,8 @@ void print_help(const char * program_name) {
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
         "[--translit-map-path=<PATH>] [--log-level=<LEVEL>] "
         "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]"
-        "[,readonly=<MODE>] [... <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>]"
-        "[,name_conversion=<method>][,readonly=<MODE>]]\n\n",
+        "[,readonly=<MODE>][,client_timestamp=<ENABLED>] [... <drive>=<root_path>[,attrs=<storage_method>]"
+        "[,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>][,client_timestamp=<ENABLED>]]\n\n",
         program_name);
 
     print(
@@ -944,7 +962,8 @@ void print_help(const char * program_name) {
         " (default: AUTO)\n"
         "  label=<volume_label>        volume label (first 11 chars used, default: {}; use \"--label=\" to remove)\n"
         "  name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)\n"
-        "  readonly=<MODE>             enable read-only sharing: 0 = writable, 1 = read-only (default: writable)\n",
+        "  readonly=<MODE>             enable read-only sharing: 0 = writable, 1 = read-only (default: writable)\n"
+        "  client_timestamp=<ENABLED>  use client timestamp if present: 0 = OFF, 1 = ON (default: ON)\n",
         DRIVE_PROTO_UDP_PORT,
         DEFAULT_VOLUME_LABEL);
 
@@ -1115,6 +1134,24 @@ int parse_share_definition(std::string_view share) {
                 continue;
             }
             print(stdout, "Unknown read-only mode \"{}\"\n", value);
+            return -1;
+        }
+        if (option == "client_timestamp") {
+            const auto value = get_token(share, ',', ++offset);
+            log(LogLevel::INFO,
+                "Client timestamp is {} for drive \"{:c}\" path \"{}\"",
+                drive.get_use_client_timestamp() ? "enabled" : "disabled",
+                drive_char,
+                drive.get_root().string());
+            if (value == "0") {
+                drive.set_use_client_timestamp(false);
+                continue;
+            }
+            if (value == "1") {
+                drive.set_use_client_timestamp(true);
+                continue;
+            }
+            print(stdout, "Unknown client_timestamp mode \"{}\"\n", value);
             return -1;
         }
         print(stdout, "Unknown argument \"{}\"\n", option);
@@ -1500,7 +1537,7 @@ int main(int argc, char ** argv) {
             if (send_msg_len > 0) {
                 // fill in header
                 auto * const header = reinterpret_cast<struct drive_proto_hdr *>(reply_info.send_packet.data());
-                header->length_flags = to_little16(send_msg_len);
+                header->length_flags |= to_little16(send_msg_len);
 
                 {
                     auto * const rcv_header =

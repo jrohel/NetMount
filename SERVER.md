@@ -20,8 +20,10 @@
 ./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
 [--translit-map-path=<PATH>] [--log-level=<LEVEL>]
-<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]
-[... <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]]
+<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]
+[,readonly=<MODE>][,client_timestamp=<ENABLED>]
+[... <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]
+[,readonly=<MODE>][,client_timestamp=<ENABLED>]]
 
 Options:
   --help                      Display this help
@@ -37,6 +39,7 @@ Options:
   label=<volume_label>        volume label (first 11 chars used, default: NETMOUNT; use "--label=" to remove)
   name_conversion=<method>    file name conversion method: OFF, RAM (default: RAM)
   readonly=<MODE>             enable read-only sharing: 0 = writable, 1 = read-only (default: writable)
+  client_timestamp=<ENABLED>  use client timestamp if present: 0 = OFF, 1 = ON (default: ON)
 ```
 
 

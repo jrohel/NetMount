@@ -11,16 +11,17 @@
 // structs are packed
 #pragma pack(push, 1)
 
-#define DRIVE_PROTO_VERSION            1
-#define DRIVE_PROTO_MAGIC              0x9524U
-#define DRIVE_PROTO_UDP_PORT           12200
-#define DRIVE_PROTO_FLAG_CHECKSUM_USED 0x8000U
-#define DRIVE_PROTO_FLAG_RO_SHARE      0x4000U
+#define DRIVE_PROTO_VERSION                1
+#define DRIVE_PROTO_MAGIC                  0x9524U
+#define DRIVE_PROTO_UDP_PORT               12200
+#define DRIVE_PROTO_FLAG_CHECKSUM_USED     0x8000U
+#define DRIVE_PROTO_FLAG_RO_SHARE          0x4000U
+#define DRIVE_PROTO_FLAG_EXTENDED_FEATURES 0x2000U
 
 // little endian
 struct drive_proto_hdr {
     uint8_t version;
-    uint16_t length_flags;  // chechsum_used | read-only share | unused | unused | unused | length
+    uint16_t length_flags;  // chechsum_used | read-only share | extended format | unused | unused | length
     uint16_t checksum;
     uint8_t sequence;
     union {
@@ -38,6 +39,12 @@ struct drive_proto_hdr {
 
 struct drive_proto_closef {
     uint16_t start_cluster;
+};
+
+
+struct drive_proto_closef_ext {
+    uint16_t start_cluster;
+    uint32_t date_time;
 };
 
 

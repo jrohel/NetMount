@@ -135,8 +135,7 @@ bool match_fcb_name_to_mask(const fcb_file_name & mask, const fcb_file_name & na
 // 7 bits 25–31: Year (since 1980, with 0 representing 1980, 1 representing 1981, and so on).
 uint32_t time_to_fat(time_t t) {
     uint32_t res;
-    struct tm * ltime;
-    ltime = localtime(&t);
+    const struct tm * const ltime = localtime(&t);
     if (ltime->tm_year < 80) {
         // 1980-01-01 00:00:00 - DOS FAT minimum timestamp
         return ((1U << 5) + 1U) << 16;
@@ -157,6 +156,24 @@ uint32_t time_to_fat(time_t t) {
     res <<= 5;
     res |= ltime->tm_sec / 2;  // DOS stores seconds divided by two
     return res;
+}
+
+
+time_t fat_to_time(uint32_t date_time) {
+    struct tm ltime;
+    ltime.tm_isdst = -1;
+    ltime.tm_sec = (date_time & 0x1f) * 2;
+    date_time >>= 5;
+    ltime.tm_min = date_time & 0x3f;
+    date_time >>= 6;
+    ltime.tm_hour = date_time & 0x1f;
+    date_time >>= 5;
+    ltime.tm_mday = date_time & 0x1f;
+    date_time >>= 5;
+    ltime.tm_mon = (date_time & 0x0f) - 1;
+    date_time >>= 4;
+    ltime.tm_year = date_time + 80;
+    return mktime(&ltime);
 }
 
 
@@ -402,6 +419,38 @@ int32_t Drive::get_file_size(uint16_t handle) {
     item.update_last_used_timestamp();
 
     return fprops.size;
+}
+
+
+bool Drive::set_file_date_time(uint16_t handle, uint32_t date_time) {
+    auto & item = get_item(handle);
+
+    if (is_read_only()) {
+        log(LogLevel::WARNING, "{}: Drive is read-only\n", __func__);
+        return false;
+    }
+
+    if (!use_client_timestamp) {
+        return false;
+    }
+
+    const auto seconds = fat_to_time(date_time);
+    auto sctp = std::chrono::system_clock::from_time_t(seconds);
+#if __cpp_lib_chrono >= 201907L
+    // C++20 and newer
+    // This path uses std::chrono::clock_cast, which is the preferred and safest method.
+    auto ftime = std::chrono::clock_cast<std::chrono::file_clock>(sctp);
+#else
+    // Fallback for older compilers lacking C++20 support
+    // This manual conversion is less robust but works as an alternative.
+    auto ftime = std::chrono::time_point_cast<std::chrono::file_clock::duration>(
+        sctp - std::chrono::system_clock::now() + std::chrono::file_clock::now());
+#endif
+    std::filesystem::last_write_time(item.path, ftime);
+
+    item.update_last_used_timestamp();
+
+    return true;
 }
 
 

@@ -82,6 +82,9 @@ public:
     bool is_read_only() const noexcept { return read_only; }
     void set_read_only(bool read_only) noexcept { this->read_only = read_only; }
 
+    bool get_use_client_timestamp() const noexcept { return use_client_timestamp; }
+    void set_use_client_timestamp(bool enabled) noexcept { use_client_timestamp = enabled; }
+
     void set_attrs_mode(AttrsMode mode) { attrs_mode = mode; }
 
     AttrsMode get_attrs_mode() const noexcept { return attrs_mode; }
@@ -119,6 +122,11 @@ public:
 
     /// Returns the size of file defined by handle (or -1 on error)
     int32_t get_file_size(uint16_t handle);
+
+    /// Sets the file's last write time according to the specified DOS FAT date_time
+    /// only if `use_client_timestamp` is enabled. If disabled, the timestamp is not modified.
+    /// Returns true if the timestamp was changed, false otherwise.
+    bool set_file_date_time(uint16_t handle, uint32_t date_time);
 
     /// Searches for files matching template `tmpl` in directory defined by `handle`
     /// with at most attributes `attr`.
@@ -187,6 +195,7 @@ private:
     bool used{false};
     std::filesystem::path root;
     bool read_only{false};
+    bool use_client_timestamp{true};
     fcb_file_name volume_label;
     bool has_volume_label{false};
     AttrsMode attrs_mode{AttrsMode::AUTO};
