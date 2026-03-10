@@ -96,7 +96,7 @@ Arguments:
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
 [--translit-map-path=<PATH>] [--log-level=<LEVEL>]
 <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]
-[... <drive>=<root_path>[,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]]
+[... <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>][,readonly=<MODE>]]
 
 Options:
   --help                      Display this help
