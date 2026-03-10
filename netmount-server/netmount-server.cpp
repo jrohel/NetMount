@@ -434,19 +434,34 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             log(LogLevel::DEBUG, "DISK_INFO for drive {:c}:\n", 'A' + reqdrv);
             try {
                 auto [fs_size, free_space] = drive.space_info();
-                // limit results to slightly under 2 GiB (otherwise MS-DOS is confused)
-                if (fs_size >= 2lu * 1024 * 1024 * 1024)
-                    fs_size = 2lu * 1024 * 1024 * 1024 - 1;
-                if (free_space >= 2lu * 1024 * 1024 * 1024)
-                    free_space = 2lu * 1024 * 1024 * 1024 - 1;
+
+                // limit results to slightly less than 2 GiB (otherwise MS-DOS is confused)
+                if (fs_size > 0x7FFFFFFFUL)
+                    fs_size = 0x7FFFFFFFUL;
+                if (free_space > 0x7FFFFFFFUL)
+                    free_space = 0x7FFFFFFFUL;
+
+
+                // Use sector size 512 bytes
+                uint16_t bytes_per_sector = 512;
+                uint32_t total_sectors = fs_size / bytes_per_sector;
+                uint32_t free_sectors = free_space / bytes_per_sector;
+
+                // Increase sector size until total sectors fit in 16-bit integer
+                while (total_sectors > 0xFFFFUL) {
+                    bytes_per_sector *= 2;
+                    total_sectors /= 2;
+                    free_sectors /= 2;
+                }
+
                 log(LogLevel::DEBUG, "  TOTAL: {} KiB ; FREE: {} KiB\n", fs_size >> 10, free_space >> 10);
                 // AX: media id (8 bits) | sectors per cluster (8 bits)
                 // etherdfs says: MSDOS tolerates only 1 here!
                 return_code = 1;
                 auto * const reply = reinterpret_cast<drive_proto_disk_info_reply *>(reply_data);
-                reply->total_clusters = to_little16(fs_size >> 15);  // 32K clusters
-                reply->bytes_per_sector = to_little16(32768);
-                reply->available_clusters = to_little16(free_space >> 15);  // 32K clusters
+                reply->total_clusters = to_little16(total_sectors);
+                reply->bytes_per_sector = to_little16(bytes_per_sector);
+                reply->available_clusters = to_little16(free_sectors);
                 reply_packet_len = sizeof(drive_proto_disk_info_reply);
             } catch (const std::runtime_error & ex) {
                 return_code = DOS_EXTERR_ACCESS_DENIED;
