@@ -239,7 +239,12 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     }
 
     const bool extended_request = from_little16(request_header->length_flags) & DRIVE_PROTO_FLAG_EXTENDED_FEATURES;
-    bool extended_features_flag_in_reply = false;
+
+    // Setting this flag in responses indicates that the server supports NETMOUNT_FEATURE_QUERY,
+    // as well as the extended CLOSE_FILE and DISK_INFO_LARGE operations.
+    // If file client timestamps are ignored (client timestamps are disabled in the server configuration),
+    // the CLOSE_FILE reply will clear this flag. In all other responses, the flag remains set.
+    bool extended_features_flag_in_reply = true;
 
     *reply_header = *request_header;
 
