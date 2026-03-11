@@ -11,7 +11,7 @@
 // structs are packed
 #pragma pack(push, 1)
 
-#define ABI_VERSION                1  // Current ABI version provided by the NetMount client
+#define ABI_VERSION                2  // Current ABI version provided by the NetMount client
 #define MIN_COMPATIBLE_ABI_VERSION 1  // Earliest ABI version that remains compatible with 'abi_version'
 
 // NetMount client parameters
@@ -93,10 +93,13 @@ struct shared_data {
     void * int2F_redirector_offset;
     interrupt_handler orig_INT2F_handler;
     interrupt_handler pktdrv_INT_handler;
+
+    // Logically part of drive_info, placed at the end for backward compatibility
+    uint8_t has_drive_extended_features[(MAX_DRIVES_COUNT - 1) / 8 + 1];
 };
 
 // Must match sizeof(struct shared_data). Update this value if the structure size changes.
-#define SHARED_DATA_SIZE 331
+#define SHARED_DATA_SIZE 335
 // Compile-time check (similar to static_assert):
 // triggers a compiler error if SHARED_DATA_SIZE != sizeof(struct shared_data)
 typedef char st_assert_SHARED_DATA_SIZE[SHARED_DATA_SIZE == sizeof(struct shared_data) ? 1 : -1];
