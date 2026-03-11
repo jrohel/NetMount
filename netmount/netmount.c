@@ -812,6 +812,10 @@ inline static void set_drive_has_ext_features(uint8_t local_drive_no, uint8_t ha
     }
 }
 
+inline static uint8_t get_drive_has_ext_features(uint8_t local_drive_no) {
+    return getptr_shared_data()->has_drive_extended_features[local_drive_no / 8] & (1 << (local_drive_no % 8)) ? 1 : 0;
+}
+
 #pragma aux handle_request_for_our_drive modify[ax bx cx dx si di es]
 static void handle_request_for_our_drive(void) {
     // caller registers stored on stack
@@ -917,15 +921,24 @@ static void handle_request_for_our_drive(void) {
             // CF set on error, clear if successful
             // AX = DOS error code
 
-
             struct dos_sft __far * const sftptr = MK_FP(r->w.es, r->w.di);
             if (sftptr->handle_count > 0) {
                 --sftptr->handle_count;
             }
 
-            struct drive_proto_closef * const args = (struct drive_proto_closef * const)buff;
-            args->start_cluster = sftptr->start_cluster;
-            if (send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features) == 0) {
+            if (sftptr->file_time != sftptr->original_file_time && get_drive_has_ext_features(reqdrv)) {
+                struct drive_proto_closef_ext * const args = (struct drive_proto_closef_ext * const)buff;
+                args->start_cluster = sftptr->start_cluster;
+                args->date_time = sftptr->file_time;
+                flag_ext_features = 1;  // Will send extended CLOSE_FILE protocol
+                i = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features);
+            } else {
+                struct drive_proto_closef * const args = (struct drive_proto_closef * const)buff;
+                args->start_cluster = sftptr->start_cluster;
+                i = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features);
+            }
+
+            if (i == 0) {
                 if (ax != 0) {
                     set_error(r, ax);
                 }
@@ -1420,8 +1433,7 @@ static void handle_request_for_our_drive(void) {
                 sft_ptr->file_pos = 0;
                 sft_ptr->open_mode &= 0xFF00U;
                 sft_ptr->open_mode |= args->mode;
-                sft_ptr->rel_sector = 0xFFFFU;
-                sft_ptr->abs_sector = 0xFFFFU;
+                sft_ptr->original_file_time = args->date_time;
                 sft_ptr->dir_sector = 0;
                 sft_ptr->dir_entry_no = 0xFF;  // why such value? no idea, EtherDFS says PHANTON.C uses that
                 sft_ptr->file_name = args->name;
