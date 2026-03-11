@@ -626,7 +626,12 @@ static void send_arp_request(uint8_t local_drive) {
 // If no response is received, the send is repeated (the maximum number of sends is MAX_NUMBER_FRAME_SEND_RETRIES).
 // Returns the length of reply, or NETWORK_ERROR on error.
 static uint16_t send_request(
-    uint8_t function, uint8_t local_drive, uint16_t request_data_len, uint8_t ** reply_data, uint16_t * reply_ax) {
+    uint8_t function,
+    uint8_t local_drive,
+    uint16_t request_data_len,
+    uint8_t ** reply_data,
+    uint16_t * reply_ax,
+    uint8_t * flag_ext_features) {
 
     const uint16_t frame_length = sizeof(struct mac_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) +
                                   sizeof(struct drive_proto_hdr) + request_data_len;
@@ -684,6 +689,9 @@ static uint16_t send_request(
     const uint16_t len = request_data_len + sizeof(*snd_drive_proto);  // drive_proto_hdr and data length
     snd_drive_proto->version = DRIVE_PROTO_VERSION;
     snd_drive_proto->length_flags = len;
+    if (*flag_ext_features) {
+        snd_drive_proto->length_flags |= DRIVE_PROTO_FLAG_EXTENDED_FEATURES;
+    }
     snd_drive_proto->sequence = sequence_num;  // sequence number
     snd_drive_proto->drive = drive;
     snd_drive_proto->function = function;  // AL value (function)
@@ -772,6 +780,7 @@ static uint16_t send_request(
             // return buffer (without headers and seq)
             *reply_data = (uint8_t *)(rcv_drive_proto + 1);  // +1 skip rcv_drive_proto header
             *reply_ax = rcv_drive_proto->ax;  //(uint16_t)rcv_drive_proto->drive << 8 | rcv_drive_proto->function;
+            *flag_ext_features = rcv_drive_proto->length_flags & DRIVE_PROTO_FLAG_EXTENDED_FEATURES ? 1 : 0;
             return len - sizeof(*rcv_drive_proto);
 
         ignore_frame:                       // ignore this frame and wait for the next one
@@ -795,6 +804,14 @@ inline static void set_error(union i86_interrupt_regs_pack __far * r, uint16_t x
     r->w.flags |= I86_FLAG_CF;
 }
 
+inline static void set_drive_has_ext_features(uint8_t local_drive_no, uint8_t has_ext_features) {
+    if (has_ext_features) {
+        getptr_shared_data()->has_drive_extended_features[local_drive_no / 8] |= 1 << (local_drive_no % 8);
+    } else {
+        getptr_shared_data()->has_drive_extended_features[local_drive_no / 8] &= ~(1 << (local_drive_no % 8));
+    }
+}
+
 #pragma aux handle_request_for_our_drive modify[ax bx cx dx si di es]
 static void handle_request_for_our_drive(void) {
     // caller registers stored on stack
@@ -804,6 +821,7 @@ static void handle_request_for_our_drive(void) {
     uint16_t i;
     unsigned char * reply;
     uint16_t ax;  // used to collect the resulting value of AX
+    uint8_t flag_ext_features = 0;
 
     struct ether_frame * const frame = getptr_global_send_buff();
     uint8_t * const buff = frame->udp_data + sizeof(struct drive_proto_hdr);  // pointer to the "query arguments"
@@ -854,7 +872,8 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            if (send_request(subfunction, reqdrv, len, &reply, &ax) == 0) {
+            if (send_request(subfunction, reqdrv, len, &reply, &ax, &flag_ext_features) == 0) {
+                set_drive_has_ext_features(reqdrv, flag_ext_features);
                 if (ax != 0) {
                     set_error(r, ax);
                 }
@@ -880,7 +899,8 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            if (send_request(subfunction, reqdrv, len, &reply, &ax) == 0) {
+            if (send_request(subfunction, reqdrv, len, &reply, &ax, &flag_ext_features) == 0) {
+                set_drive_has_ext_features(reqdrv, flag_ext_features);
                 if (ax != 0) {
                     set_error(r, ax);
                 }
@@ -905,7 +925,7 @@ static void handle_request_for_our_drive(void) {
 
             struct drive_proto_closef * const args = (struct drive_proto_closef * const)buff;
             args->start_cluster = sftptr->start_cluster;
-            if (send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax) == 0) {
+            if (send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features) == 0) {
                 if (ax != 0) {
                     set_error(r, ax);
                 }
@@ -984,7 +1004,7 @@ static void handle_request_for_our_drive(void) {
                 args->offset = read_offset;
                 args->start_cluster = sftptr->start_cluster;
                 args->length = bytes_to_read;
-                uint16_t len = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax);
+                uint16_t len = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features);
                 if (len == NETWORK_ERROR) {
                     set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
                     break;
@@ -1035,7 +1055,7 @@ static void handle_request_for_our_drive(void) {
                 args->offset = sftptr->file_pos + total_read_len;
                 args->start_cluster = sftptr->start_cluster;
                 args->length = chunklen;
-                len = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax);
+                len = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features);
                 if (len == NETWORK_ERROR) {
                     set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
                     break;
@@ -1105,7 +1125,8 @@ static void handle_request_for_our_drive(void) {
                 args->offset = sftptr->file_pos;
                 args->start_cluster = sftptr->start_cluster;
                 my_memcpy_ff(buff + sizeof(*args), sda_ptr->curr_dta + total_written_len, chunklen);
-                uint16_t len = send_request(subfunction, reqdrv, chunklen + sizeof(*args), &reply, &ax);
+                uint16_t len =
+                    send_request(subfunction, reqdrv, chunklen + sizeof(*args), &reply, &ax, &flag_ext_features);
                 if (len == NETWORK_ERROR) {
                     set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
                     break;
@@ -1151,8 +1172,12 @@ static void handle_request_for_our_drive(void) {
 
             my_memcpy_ff(buff + sizeof(*args), MK_FP(r->w.ds, r->w.dx), args->params_count << 3);
             if (send_request(
-                    INT2F_LOCK_UNLOCK_FILE + r->b.bl, reqdrv, (args->params_count << 3) + sizeof(*args), &reply, &ax) !=
-                0) {
+                    INT2F_LOCK_UNLOCK_FILE + r->b.bl,
+                    reqdrv,
+                    (args->params_count << 3) + sizeof(*args),
+                    &reply,
+                    &ax,
+                    &flag_ext_features) != 0) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
             }
         } break;
@@ -1170,7 +1195,8 @@ static void handle_request_for_our_drive(void) {
             // CX = bytes per sector
             // DX = number of available clusters
 
-            if (send_request(subfunction, reqdrv, 0, &reply, &ax) == 6) {
+            if (send_request(subfunction, reqdrv, 0, &reply, &ax, &flag_ext_features) == 6) {
+                set_drive_has_ext_features(reqdrv, flag_ext_features);
                 r->w.ax = ax;  // AL -  sectors per cluster, AH - media ID byte
                 struct drive_proto_disk_info_reply const * const args =
                     (struct drive_proto_disk_info_reply const * const)reply;
@@ -1203,10 +1229,13 @@ static void handle_request_for_our_drive(void) {
             // new file attributes are on the original stack
             struct drive_proto_set_attrs * const args = (struct drive_proto_set_attrs * const)buff;
             args->attrs = *(*getptr_global_orig_stack_ptr() + sizeof(*r) / 2);
-            i = send_request(subfunction, reqdrv, len + sizeof(*args), &reply, &ax);
+            i = send_request(subfunction, reqdrv, len + sizeof(*args), &reply, &ax, &flag_ext_features);
             if (i != 0) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if (ax != 0) {
+                break;
+            }
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if (ax != 0) {
                 set_error(r, ax);
             }
         } break;
@@ -1231,10 +1260,13 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            i = send_request(subfunction, reqdrv, len, &reply, &ax);
-            if ((uint16_t)i == 0xFFFFU) {
+            i = send_request(subfunction, reqdrv, len, &reply, &ax, &flag_ext_features);
+            if (i == NETWORK_ERROR) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if (i != sizeof(struct drive_proto_get_attrs_reply) || ax != 0) {
+                break;
+            }
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if (i != sizeof(struct drive_proto_get_attrs_reply) || ax != 0) {
                 set_error(r, ax);
             } else {
                 struct drive_proto_get_attrs_reply const * const args =
@@ -1281,10 +1313,13 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            i = send_request(subfunction, reqdrv, 1 + buff[0] + len, &reply, &ax);
+            i = send_request(subfunction, reqdrv, 1 + buff[0] + len, &reply, &ax, &flag_ext_features);
             if (i != 0) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if (ax != 0) {
+                break;
+            }
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if (ax != 0) {
                 set_error(r, ax);
             }
             break;
@@ -1304,10 +1339,13 @@ static void handle_request_for_our_drive(void) {
                 break;
             }
 
-            i = send_request(subfunction, reqdrv, len, &reply, &ax);
+            i = send_request(subfunction, reqdrv, len, &reply, &ax, &flag_ext_features);
             if (i == NETWORK_ERROR) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
-            } else if ((i != 0) || (ax != 0)) {
+                break;
+            }
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if ((i != 0) || (ax != 0)) {
                 set_error(r, ax);
             }
             break;
@@ -1343,10 +1381,14 @@ static void handle_request_for_our_drive(void) {
                 args->mode = sda_ptr->mode_ext;
             }
 
-            i = send_request(subfunction, reqdrv, len + 6, &reply, &ax);
+            i = send_request(subfunction, reqdrv, len + 6, &reply, &ax, &flag_ext_features);
             if (i == NETWORK_ERROR) {
                 set_error(r, 2);
-            } else if (i != sizeof(struct drive_proto_open_create_reply) || ax != 0) {
+                break;
+            }
+
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if (i != sizeof(struct drive_proto_open_create_reply) || ax != 0) {
                 set_error(r, ax);
             } else {
                 struct dos_sft __far * const sft_ptr = MK_FP(r->w.es, r->w.di);
@@ -1426,7 +1468,7 @@ static void handle_request_for_our_drive(void) {
                 len = sizeof(*args);
             }
 
-            i = send_request(subfunction, reqdrv, len, &reply, &ax);
+            i = send_request(subfunction, reqdrv, len, &reply, &ax, &flag_ext_features);
             if (i == NETWORK_ERROR) {
                 if (subfunction == INT2F_FIND_FIRST) {
                     set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
@@ -1434,7 +1476,10 @@ static void handle_request_for_our_drive(void) {
                     set_error(r, DOS_EXTERR_NO_MORE_FILES);
                 }
                 break;
-            } else if (ax != 0 || i != sizeof(struct drive_proto_find_reply)) {
+            }
+
+            set_drive_has_ext_features(reqdrv, flag_ext_features);
+            if (ax != 0 || i != sizeof(struct drive_proto_find_reply)) {
                 set_error(r, ax);
                 break;
             }
@@ -1486,7 +1531,7 @@ static void handle_request_for_our_drive(void) {
             args->offset_from_end_hi = r->w.cx;
             args->start_cluster = sftptr->start_cluster;
 
-            i = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax);
+            i = send_request(subfunction, reqdrv, sizeof(*args), &reply, &ax, &flag_ext_features);
             if (i == NETWORK_ERROR) {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
             } else if (ax != 0 || i != sizeof(struct drive_proto_seek_from_end_reply)) {
@@ -2967,6 +3012,9 @@ int main(int argc, char * argv[]) {
         drv_info->enabled_checksums = enabled_checksums;
 
         drv_info->min_server_read_len = min_server_read_len;
+
+        // Mount the drive with extended features disabled until the remote server indicates otherwise
+        shared_data_ptr->has_drive_extended_features[drive_no / 8] &= ~(1 << (drive_no % 8));
 
         // set drive as being 'network' drives (also add the PHYSICAL bit,
         // otherwise MS-DOS 6.0 will ignore the drive)
