@@ -43,8 +43,9 @@ Arguments:
 <local_drive_letter>  Specifies the mounted drive to work with (e.g. H)
 <get_net_option>      IP, MASK, GW, PORT, MTU, ARP_REQUESTS, PKT_INT, MAC
 <set_net_option>      PORT, MTU, ARP_REQUESTS
-<get_drive_option>    IP, PORT, DRIVE, MIN_READ_LEN, MIN_RCV_TMO, MAX_RCV_TMO,
-                      MAX_RETRIES, CHECKSUM_NETMOUNT, CHECKSUM_IP_HEADER
+<get_drive_option>    IP, PORT, DRIVE, HAS_EXTENDED_FEATURES, MIN_READ_LEN,
+                      MIN_RCV_TMO, MAX_RCV_TMO, MAX_RETRIES, CHECKSUM_NETMOUNT,
+                      CHECKSUM_IP_HEADER
 <set_drive_option>    MIN_READ_LEN, MIN_RCV_TMO, MAX_RCV_TMO,
                       MAX_RETRIES, CHECKSUM_NETMOUNT, CHECKSUM_IP_HEADER
 <value>               Specifies value to set
@@ -58,12 +59,13 @@ Arguments:
 ```
 C:\>nmmanage info
 NMManage
-Version: 1.0.0
-ABI version: 1
+Version: 1.1.0
+ABI version: 2
 
 Detected installed NetMount client
-Version: 1.7.0
-ABI version: 1
+Version: 1.8.0
+ABI version: 2
+Minimum compatible ABI version: 1
 ```
 
 **Show current NetMount network settings**
@@ -105,6 +107,7 @@ Local drive: H
 Server IP: 192.168.122.1
 Server udp PORT: 12200
 Server DRIVE: C
+Server HAS_EXTENDED_FEATURES: YES
 Minimum length of data block read from the server MIN_READ_LEN [bytes]: 64
 Minimum response timenout MIN_RCV_TMO [seconds]: 1
 Maximum response timenout MAX_RCV_TMO [seconds]: 5

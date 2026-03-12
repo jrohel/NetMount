@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <strings.h>
 
-#define NMMANAGE_VERSION "1.0.0"
+#define NMMANAGE_VERSION "1.1.0"
 
 
 #define STRINGIFY(x) #x
@@ -285,6 +285,13 @@ static int drive_info(const struct shared_data __far * data, uint8_t drive_no) {
     printf("Server IP: %d.%d.%d.%d\n", ip.bytes[0], ip.bytes[1], ip.bytes[2], ip.bytes[3]);
     printf("Server udp PORT: %d\n", drive->remote_port);
     printf("Server DRIVE: %c\n", data->drive_map[drive_no] + 'A');
+    if (data->abi_version >= 2) {
+        printf(
+            "Server HAS_EXTENDED_FEATURES: %s\n",
+            data->has_drive_extended_features[drive_no / 8] & (1 << (drive_no % 8)) ? "YES" : "NO");
+    } else {
+        printf("Client does not support extended features\n");
+    }
     printf("Minimum length of data block read from the server MIN_READ_LEN [bytes]: %d\n", drive->min_server_read_len);
     printf(
         "Minimum response timenout MIN_RCV_TMO [seconds]: %d\n", compute_rcv_tmo(drive->min_rcv_tmo_18_2_ticks_shr_2));
@@ -316,6 +323,12 @@ static int drive_get(const struct shared_data __far * restrict data, uint8_t dri
         printf("%d\n", drive->remote_port);
     } else if (strcasecmp(option, "DRIVE") == 0) {
         printf("%c\n", data->drive_map[drive_no] + 'A');
+    } else if (strcasecmp(option, "HAS_EXTENDED_FEATURES") == 0) {
+        if (data->abi_version >= 2) {
+            printf("%s\n", data->has_drive_extended_features[drive_no / 8] & (1 << (drive_no % 8)) ? "YES" : "NO");
+        } else {
+            printf("NO\n");
+        }
     } else if (strcasecmp(option, "MIN_READ_LEN") == 0) {
         printf("%d\n", drive->min_server_read_len);
     } else if (strcasecmp(option, "MIN_RCV_TMO") == 0) {
@@ -601,7 +614,7 @@ static void print_help(void) {
     printf(
         "NMManage " NMMANAGE_VERSION
         "\n"
-        "Copyright 2025 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
+        "Copyright 2025-2026 Jaroslav Rohel <jaroslav.rohel@gmail.com>\n"
         "NMManage comes with ABSOLUTELY NO WARRANTY.\n"
         "This is free software, and you are welcome to redistribute it\n"
         "under the terms of the GNU General Public License, version 2.\n"
@@ -637,8 +650,9 @@ static void print_help(void) {
         "<local_drive_letter>  Specifies the mounted drive to work with (e.g. H)\n"
         "<get_net_option>      IP, MASK, GW, PORT, MTU, ARP_REQUESTS, PKT_INT, MAC\n"
         "<set_net_option>      PORT, MTU, ARP_REQUESTS\n"
-        "<get_drive_option>    IP, PORT, DRIVE, MIN_READ_LEN, MIN_RCV_TMO, MAX_RCV_TMO,\n"
-        "                      MAX_RETRIES, CHECKSUM_NETMOUNT, CHECKSUM_IP_HEADER\n"
+        "<get_drive_option>    IP, PORT, DRIVE, HAS_EXTENDED_FEATURES, MIN_READ_LEN,\n"
+        "                      MIN_RCV_TMO, MAX_RCV_TMO, MAX_RETRIES, CHECKSUM_NETMOUNT,\n"
+        "                      CHECKSUM_IP_HEADER\n"
         "<set_drive_option>    MIN_READ_LEN, MIN_RCV_TMO, MAX_RCV_TMO,\n"
         "                      MAX_RETRIES, CHECKSUM_NETMOUNT, CHECKSUM_IP_HEADER\n"
         "<value>               Specifies value to set\n"
@@ -668,7 +682,7 @@ int main(int argc, char * argv[]) {
 
     struct shared_data __far * const data = get_installed_shared_data_ptr(info.multiplex_id);
 
-    if (data->abi_version < ABI_VERSION || data->min_compatible_abi_version > ABI_VERSION) {
+    if (data->min_compatible_abi_version > ABI_VERSION) {
         printf("NMManage is not compatible with installed NetMount client\n");
         nmmanage_info();
         printf("\n");
