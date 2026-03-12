@@ -228,11 +228,15 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
         reply_info.recv_len == request_packet_len &&
         memcmp(reply_info.recv_packet.data(), request_packet, request_packet_len) == 0) {
         if (reply_info.send_len > 0) {
-            log(LogLevel::NOTICE, "Using a packet from the reply cache (seq {:d})\n", reply_header->sequence);
+            log(LogLevel::NOTICE,
+                "{}: Using a packet from the reply cache (seq {:d})\n",
+                __func__,
+                reply_header->sequence);
             return reply_info.send_len;
         } else {
             log(LogLevel::NOTICE,
-                "Request with seq {:d} found in reply cache, but no response exists. Ignoring.\n",
+                "{}: Request with seq {:d} found in reply cache, but no response exists. Ignoring.\n",
+                __func__,
                 request_header->sequence);
             return -1;
         }
@@ -257,14 +261,18 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     int reply_packet_len = 0;
 
     if ((reqdrv < 2) || (reqdrv >= drives.size())) {
-        log(LogLevel::WARNING, "Requested invalid drive number: {:d}\n", reqdrv);
+        log(LogLevel::WARNING, "{}: Requested invalid drive number: {:d}\n", __func__, reqdrv);
         return -1;
     }
 
     // Do I share this drive?
     auto & drive = drives[reqdrv];
     if (!drive.is_shared()) {
-        log(LogLevel::WARNING, "Requested drive is not shared: {:c}: (number {:d})\n", 'A' + reqdrv, reqdrv);
+        log(LogLevel::WARNING,
+            "{}: Requested drive is not shared: {:c}: (number {:d})\n",
+            __func__,
+            'A' + reqdrv,
+            reqdrv);
         return -1;
     }
 
@@ -688,11 +696,11 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             try {
                 DosFileProperties properties;
                 if (!drive.find_file(handle, *fcbmask, fattr, properties, fpos)) {
-                    log(LogLevel::DEBUG, "No more matching files found\n");
+                    log(LogLevel::DEBUG, "FIND_NEXT No more matching files found\n");
                     return_code = DOS_EXTERR_NO_MORE_FILES;
                 } else {
                     log(LogLevel::DEBUG,
-                        "Found file: FCB \"{}\", attrs 0x{:02X}\n",
+                        "FIND_NEXT Found file: FCB \"{}\", attrs 0x{:02X}\n",
                         fcb_file_name_to_cstr(properties.fcb_name),
                         properties.attrs);
                     auto * const reply = reinterpret_cast<drive_proto_find_reply *>(reply_data);
@@ -832,7 +840,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                         const auto attr = drive.get_server_path_dos_properties(server_path, &properties);
                         result_open_mode = ext_open_create_open_mode & 0x7f;  // Why 0x7F? PHANTOM.C does it too
                         if (attr == FAT_ERROR_ATTR) {                         // file not found
-                            log(LogLevel::DEBUG, "File doesn't exist -> ");
+                            log(LogLevel::DEBUG, "EXTENDED_OPEN_CREATE_FILE File doesn't exist -> ");
                             if ((action_code & IF_NOT_EXIST_MASK) == ACTION_CODE_CREATE_IF_NOT_EXIST) {
                                 log(LogLevel::DEBUG, "create file\n");
                                 properties = drive.create_or_truncate_file(server_path, stack_attr & 0xFF, attr);
@@ -847,7 +855,9 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                                     DOS_EXTERR_FILE_NOT_FOUND);
                             }
                         } else {
-                            log(LogLevel::DEBUG, "Path exists already (attr 0x{:02X}) -> ", attr);
+                            log(LogLevel::DEBUG,
+                                "EXTENDED_OPEN_CREATE_FILE Path exists already (attr 0x{:02X}) -> ",
+                                attr);
                             if ((action_code & IF_EXIST_MASK) == ACTION_CODE_OPEN_IF_EXIST) {
                                 log(LogLevel::DEBUG, "open file\n");
                                 drive.try_open_file(server_path, result_open_mode, attr);
@@ -869,7 +879,10 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                     // success (found a file, created it or truncated it)
                     const auto handle = drive.get_handle(server_path);
                     const auto fcb_name = short_name_to_fcb(relative_path.filename().string());
-                    log(LogLevel::DEBUG, "File \"{}\", handle {}\n", server_path.string(), handle);
+                    log(LogLevel::DEBUG,
+                        "OPEN/CREATE/EXTENDED_OPEN_CREATE File \"{}\", handle {}\n",
+                        server_path.string(),
+                        handle);
                     log(LogLevel::DEBUG, "    FCB file name: {}\n", fcb_file_name_to_cstr(fcb_name));
                     log(LogLevel::DEBUG, "    size: {}\n", properties.size);
                     log(LogLevel::DEBUG, "    attrs: 0x{:02X}\n", properties.attrs);

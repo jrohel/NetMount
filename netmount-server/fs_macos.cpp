@@ -23,7 +23,8 @@ bool is_dos_attrs_in_extended_supported(const std::filesystem::path & path) {
     if (ret == -1) {
         const auto orig_errno = errno;
         log(LogLevel::DEBUG,
-            "is_dos_attrs_in_extended_supported: Failed to fetch attributes of \"{}\": {}\n",
+            "{}: Failed to fetch attributes of \"{}\": {}\n",
+            __func__,
             path.string(),
             strerror(orig_errno));
         if (orig_errno == ENOTSUP) {
@@ -46,9 +47,7 @@ uint8_t get_dos_attrs_from_extended(const std::filesystem::path & path) {
         }
         throw std::runtime_error(
             std::format(
-                "get_dos_attrs_from_extended: Failed to fetch attributes of \"{}\": {}\n",
-                path.string(),
-                strerror(orig_errno)));
+                "{}: Failed to fetch attributes of \"{}\": {}\n", __func__, path.string(), strerror(orig_errno)));
     }
     return attrs[0] & (FAT_ARCHIVE | FAT_HIDDEN | FAT_RO | FAT_SYSTEM);
 }
@@ -71,9 +70,7 @@ void set_dos_attrs_to_extended(const std::filesystem::path & path, uint8_t attrs
             }
             throw std::runtime_error(
                 std::format(
-                    "set_dos_attrs_to_extended: Failed to remove attributes of \"{}\": {}\n",
-                    path.string(),
-                    strerror(orig_errno)));
+                    "{}: Failed to remove attributes of \"{}\": {}\n", __func__, path.string(), strerror(orig_errno)));
         }
         return;
     }
@@ -83,10 +80,7 @@ void set_dos_attrs_to_extended(const std::filesystem::path & path, uint8_t attrs
     if (ret == -1) {
         const auto orig_errno = errno;
         throw std::runtime_error(
-            std::format(
-                "set_dos_attrs_to_extended: Failed to set attributes of \"{}\": {}\n",
-                path.string(),
-                strerror(orig_errno)));
+            std::format("{}: Failed to set attributes of \"{}\": {}\n", __func__, path.string(), strerror(orig_errno)));
     }
 }
 

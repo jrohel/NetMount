@@ -95,7 +95,11 @@ void load_transliteration_map(const std::filesystem::path & filename) {
 
         size_t colon = line.find(':');
         if (colon == std::string::npos) {
-            log(LogLevel::ERROR, "Missing ':' in file \"{}\" on line {}\n", filename.string(), line_number);
+            log(LogLevel::ERROR,
+                "{}: Missing ':' in file \"{}\" on line {}\n",
+                __func__,
+                filename.string(),
+                line_number);
         }
 
         auto key = std::string_view(line.begin(), line.begin() + colon);
@@ -104,18 +108,23 @@ void load_transliteration_map(const std::filesystem::path & filename) {
         clean_token(value);
 
         if (key.empty()) {
-            log(LogLevel::ERROR, "Empty key in file \"{}\" on line {}\n", filename.string(), line_number);
+            log(LogLevel::ERROR, "{}: Empty key in file \"{}\" on line {}\n", __func__, filename.string(), line_number);
         }
 
         const auto [cp, is_ok] = utf8_to_codepoint(key);
         if (!is_ok) {
-            log(LogLevel::ERROR, "Invalid UTF-8 key in file \"{}\" on line {}\n", filename.string(), line_number);
+            log(LogLevel::ERROR,
+                "{}: Invalid UTF-8 key in file \"{}\" on line {}\n",
+                __func__,
+                filename.string(),
+                line_number);
         }
 
         const auto [it, inserted] = transliteration_map.try_emplace(cp, value);
         if (!inserted && value != it->second) {
             log(LogLevel::WARNING,
-                "The key '{}' in file \"{}\" on line {} has already been inserted with a different value\n",
+                "{}: The key '{}' in file \"{}\" on line {} has already been inserted with a different value\n",
+                __func__,
                 key,
                 filename.string(),
                 line_number);

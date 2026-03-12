@@ -205,7 +205,7 @@ void Drive::set_root(std::filesystem::path root) {
 void Drive::set_volume_label(const std::string & label) {
     if (label.empty()) {
         has_volume_label = false;
-        log(LogLevel::DEBUG, "set_volume_label: Remove label\n");
+        log(LogLevel::DEBUG, "{}: Remove label\n", __func__);
         return;
     }
 
@@ -231,7 +231,8 @@ void Drive::set_volume_label(const std::string & label) {
     has_volume_label = true;
 
     log(LogLevel::DEBUG,
-        "set_volume_label: Set label \"{:.8s}{:.3s}\"\n",
+        "{}: Set label \"{:.8s}{:.3s}\"\n",
+        __func__,
         reinterpret_cast<const char *>(volume_label.name_blank_padded),
         reinterpret_cast<const char *>(volume_label.ext_blank_padded));
 }
@@ -249,7 +250,8 @@ uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
         if (cur_item.path == server_path) {
             cur_item.last_used_time = now;
             log(LogLevel::DEBUG,
-                "get_handle: Found handle {} with path \"{}\" in cache\n",
+                "{}: Found handle {} with path \"{}\" in cache\n",
+                __func__,
                 handle,
                 server_path.string());
             return handle;
@@ -260,7 +262,8 @@ uint16_t Drive::get_handle(const std::filesystem::path & server_path) {
                 // Directory list is too old -> remove it from cache and free memory.
                 // It will be re-generated if necessary.
                 log(LogLevel::DEBUG,
-                    "get_handle: Remove old directory list for handle {} path \"{}\" from cache\n",
+                    "{}: Remove old directory list for handle {} path \"{}\" from cache\n",
+                    __func__,
                     handle,
                     server_path.string());
                 cur_item.directory_list = {};
@@ -327,7 +330,7 @@ int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16
     item.update_last_used_timestamp();
 
     if (is_dangling_symlink(fname)) {
-        throw FilesystemError("read_file: Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
+        throw FilesystemError("Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
     }
 
 #ifdef _WIN32
@@ -355,7 +358,7 @@ int32_t Drive::read_file(void * buffer, uint16_t handle, uint32_t offset, uint16
 
 int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset, uint16_t len) {
     if (is_read_only()) {
-        throw FilesystemError(std::string(__func__) + ": Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
+        throw FilesystemError("Drive is read-only", DOS_EXTERR_DISK_WRITE_PROTECTED);
     }
 
     auto & item = get_item(handle);
@@ -364,7 +367,7 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
     item.update_last_used_timestamp();
 
     if (is_dangling_symlink(fname)) {
-        throw FilesystemError("read_file: Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
+        throw FilesystemError("Dangling symlink: " + fname.string(), DOS_EXTERR_ACCESS_DENIED);
     }
 
     // READ_ONLY DOS attribute is handled at open time. Do not check it here.
@@ -378,13 +381,13 @@ int32_t Drive::write_file(const void * buffer, uint16_t handle, uint32_t offset,
 
     // len 0 means "truncate" or "extend"
     if (len == 0) {
-        log(LogLevel::DEBUG, "write_file: truncate \"{}\" to {} bytes\n", fname.string(), offset);
+        log(LogLevel::DEBUG, "{}: truncate \"{}\" to {} bytes\n", __func__, fname.string(), offset);
         resize_file(fname, offset);
         return 0;
     }
 
     //  write to file
-    log(LogLevel::DEBUG, "write_file: write {} bytes into file \"{}\" at offset {}\n", len, fname.string(), offset);
+    log(LogLevel::DEBUG, "{}: write {} bytes into file \"{}\" at offset {}\n", __func__, len, fname.string(), offset);
 #ifdef _WIN32
     auto * const fd = _wfopen(fname.c_str(), L"r+b");
 #else
@@ -461,11 +464,11 @@ bool Drive::find_file(
         // Handle volume label directly; no need to process directory list.
         if (nth == 0) {
             if (!has_volume_label) {
-                log(LogLevel::DEBUG, "find_file: Drive has no volume label\n");
+                log(LogLevel::DEBUG, "{}: Drive has no volume label\n", __func__);
                 return false;
             }
             if (!match_fcb_name_to_mask(tmpl, volume_label)) {
-                log(LogLevel::DEBUG, "find_file: Drive volume label does not match mask\n");
+                log(LogLevel::DEBUG, "{}: Drive volume label does not match mask\n", __func__);
                 return false;
             }
 
@@ -475,7 +478,8 @@ bool Drive::find_file(
             properties.time_date = 0;
 
             log(LogLevel::DEBUG,
-                "find_file: Found volume label: {:.8s}{:.3s}\n",
+                "{}: Found volume label: {:.8s}{:.3s}\n",
+                __func__,
                 reinterpret_cast<const char *>(volume_label.name_blank_padded),
                 reinterpret_cast<const char *>(volume_label.ext_blank_padded));
 
@@ -492,10 +496,10 @@ bool Drive::find_file(
     if ((nth == 0) || (item.directory_list.empty())) {
         const auto count = item.create_directory_list(*this);
         if (count < 0) {
-            log(LogLevel::WARNING, "Failed to scan dir \"{}\"\n", item.path.string());
+            log(LogLevel::WARNING, "{}: Failed to scan dir \"{}\"\n", __func__, item.path.string());
             return false;
         } else {
-            log(LogLevel::DEBUG, "Scanned dir \"{}\", found {} items\n", item.path.string(), count);
+            log(LogLevel::DEBUG, "{}: Scanned dir \"{}\", found {} items\n", __func__, item.path.string(), count);
             if (global_log_level >= LogLevel::TRACE) {
                 for (const auto & item : item.directory_list) {
                     log(LogLevel::TRACE,
@@ -801,13 +805,14 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
                 }
                 if (attrs & FAT_RO) {
                     log(LogLevel::NOTICE,
-                        "Access denied: File \"{}\" has the READ_ONLY attribute",
+                        "{}: Access denied: File \"{}\" has the READ_ONLY attribute",
+                        __func__,
                         dentry.path().string());
                     continue;
                 }
                 std::error_code ec;
                 if (!std::filesystem::remove(dentry.path(), ec)) {
-                    log(LogLevel::NOTICE, "delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
+                    log(LogLevel::NOTICE, "{}: Failed to delete file \"{}\": {}\n", __func__, path_str, ec.message());
                 }
             }
         }
@@ -832,13 +837,16 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             } catch (const std::runtime_error &) {
             }
             if (attrs & FAT_RO) {
-                log(LogLevel::NOTICE, "Access denied: File \"{}\" has the READ_ONLY attribute", path.string());
+                log(LogLevel::NOTICE,
+                    "{}: Access denied: File \"{}\" has the READ_ONLY attribute",
+                    __func__,
+                    path.string());
                 continue;
             }
             try {
                 netmount_srv::delete_file(path);
             } catch (const std::runtime_error & ex) {
-                log(LogLevel::NOTICE, "delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
+                log(LogLevel::NOTICE, "{}: Failed to delete file \"{}\": {}\n", __func__, path.string(), ex.what());
             }
         }
     }
@@ -920,7 +928,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                 std::error_code ec;
                 const bool is_root_dir = std::filesystem::equivalent(path, drive.get_root(), ec);
                 if (ec) {
-                    log(LogLevel::WARNING, "create_directory_list: {}\n", ec.message());
+                    log(LogLevel::WARNING, "{}: {}\n", __func__, ec.message());
                     return -1;
                 }
                 if (is_root_dir) {
@@ -931,7 +939,8 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                         fprops.size = 0;
                         fprops.time_date = 0;
                         log(LogLevel::DEBUG,
-                            "create_directory_list: VOLUME LABEL {:.8s}{:.3s} -> {:.8s} {:.3s}\n",
+                            "{}: VOLUME LABEL {:.8s}{:.3s} -> {:.8s} {:.3s}\n",
+                            __func__,
                             reinterpret_cast<const char *>(drive.volume_label.name_blank_padded),
                             reinterpret_cast<const char *>(drive.volume_label.ext_blank_padded),
                             reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
@@ -949,7 +958,8 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                             fprops.server_name = name;
                         }
                         log(LogLevel::DEBUG,
-                            "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                            "{}: {} -> {:.8s} {:.3s}\n",
+                            __func__,
                             name,
                             reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
                             reinterpret_cast<const char *>(fprops.fcb_name.ext_blank_padded));
@@ -958,9 +968,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                 }
             } else if (directory_list.size() == 0xFFFFU) {
                 // DOS FIND uses a 16-bit offset for directory entries, we cannot address more than 65535 entries.
-                log(LogLevel::ERROR,
-                    "FilesystemDB::Item::create_directory_list: Directory \"{}\" contains more than 65535 items",
-                    path.string());
+                log(LogLevel::ERROR, "{}: Directory \"{}\" contains more than 65535 items", __func__, path.string());
                 break;
             }
 
@@ -973,14 +981,15 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                 fprops.server_name = filename;
             }
             log(LogLevel::DEBUG,
-                "create_directory_list: {} -> {:.8s} {:.3s}\n",
+                "{}: {} -> {:.8s} {:.3s}\n",
+                __func__,
                 filename.string(),
                 reinterpret_cast<const char *>(fprops.fcb_name.name_blank_padded),
                 reinterpret_cast<const char *>(fprops.fcb_name.ext_blank_padded));
             directory_list.emplace_back(fprops);
         }
     } catch (const std::runtime_error & ex) {
-        log(LogLevel::WARNING, "create_directory_list: {}\n", ex.what());
+        log(LogLevel::WARNING, "{}: {}\n", __func__, ex.what());
         return -1;
     }
 
@@ -1184,7 +1193,7 @@ uint8_t get_path_dos_properties(
         }
         return attrs;
     } catch (const std::runtime_error & ex) {
-        log(LogLevel::DEBUG, "get_path_dos_properties: {}\n", ex.what());
+        log(LogLevel::DEBUG, "{}: {}\n", __func__, ex.what());
     }
 
     return FAT_ERROR_ATTR;
@@ -1291,7 +1300,8 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
             set_item_attrs(path, attrs, mode);
         } catch (const std::runtime_error & ex) {
             log(LogLevel::WARNING,
-                "create_or_truncate_file: Failed to set attribute 0x{:02X} to \"{}\": {}\n",
+                "{}: Failed to set attribute 0x{:02X} to \"{}\": {}\n",
+                __func__,
                 attrs,
                 path.string(),
                 ex.what());

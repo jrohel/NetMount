@@ -42,7 +42,8 @@ uint8_t get_dos_attrs_native(const std::filesystem::path & path) {
     if (attrs == INVALID_FILE_ATTRIBUTES) {
         throw std::runtime_error(
             std::format(
-                "get_dos_attrs_native: Failed to fetch attributes of \"{}\": {}\n",
+                "{}: Failed to fetch attributes of \"{}\": {}\n",
+                __func__,
                 path.string(),
                 get_error_message(GetLastError())));
     }
@@ -81,7 +82,8 @@ void set_dos_attrs_native(const std::filesystem::path & path, uint8_t attrs) {
     if (!result) {
         throw std::runtime_error(
             std::format(
-                "set_dos_attrs_native: Failed to set attributes of \"{}\": {}\n",
+                "{}: Failed to set attributes of \"{}\": {}\n",
+                __func__,
                 path.string(),
                 get_error_message(GetLastError())));
     }
