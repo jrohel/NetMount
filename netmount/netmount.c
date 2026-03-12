@@ -1208,7 +1208,8 @@ static void handle_request_for_our_drive(void) {
             // CX = bytes per sector
             // DX = number of available clusters
 
-            if (send_request(subfunction, reqdrv, 0, &reply, &ax, &flag_ext_features) == 6) {
+            if (send_request(subfunction, reqdrv, 0, &reply, &ax, &flag_ext_features) ==
+                sizeof(struct drive_proto_disk_info_reply)) {
                 set_drive_has_ext_features(reqdrv, flag_ext_features);
                 r->w.ax = ax;  // AL -  sectors per cluster, AH - media ID byte
                 struct drive_proto_disk_info_reply const * const args =
@@ -1216,6 +1217,43 @@ static void handle_request_for_our_drive(void) {
                 r->w.bx = args->total_clusters;
                 r->w.cx = args->bytes_per_sector;
                 r->w.dx = args->available_clusters;
+            } else {
+                set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
+            }
+            break;
+
+        case INT2F_DISK_INFO_LARGE:
+            // Return:
+            // AX:BX = total clusters
+            // CX:DX = number of available clusters
+            // SI = bytes per sector SI
+
+            if (get_drive_has_ext_features(reqdrv)) {
+                if (send_request(subfunction, reqdrv, 0, &reply, &ax, &flag_ext_features) ==
+                    sizeof(struct drive_proto_disk_info_large_reply)) {
+                    struct drive_proto_disk_info_large_reply const * const args =
+                        (struct drive_proto_disk_info_large_reply const * const)reply;
+                    r->w.ax = args->total_clusters >> 16;
+                    r->w.bx = args->total_clusters;
+                    r->w.cx = args->available_clusters >> 16;
+                    r->w.dx = args->available_clusters;
+                    r->w.si = args->bytes_per_sector;
+                } else {
+                    set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
+                }
+                break;
+            }
+
+            if (send_request(INT2F_DISK_INFO, reqdrv, 0, &reply, &ax, &flag_ext_features) ==
+                sizeof(struct drive_proto_disk_info_reply)) {
+                set_drive_has_ext_features(reqdrv, flag_ext_features);
+                struct drive_proto_disk_info_reply const * const args =
+                    (struct drive_proto_disk_info_reply const * const)reply;
+                r->w.ax = 0;
+                r->w.bx = args->total_clusters;
+                r->w.cx = 0;
+                r->w.dx = args->available_clusters;
+                r->w.si = args->bytes_per_sector;
             } else {
                 set_error(r, DOS_EXTERR_FILE_NOT_FOUND);
             }
@@ -1715,6 +1753,10 @@ static void __declspec(naked) int2F_redirector(void) {
         je jmp_to_prev_handler2
 
         // if it is a function that is not supported by us, jump to the previous INT 2F handler
+        // INT2F_DISK_INFO_LARGE is supported, but not listed in the supported_functions_table
+        // to avoid enlarging the table. Test it separately.
+        cmp al, INT2F_DISK_INFO_LARGE
+        je get_drive
         cmp al, 0x2E
         jg jmp_to_prev_handler2
         push bx
