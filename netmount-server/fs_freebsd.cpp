@@ -17,7 +17,7 @@ bool is_on_fat(const std::filesystem::path & path) {
     const auto res = statfs(path.c_str(), &buf);
     if (res == -1) {
         const auto orig_errno = errno;
-        log(LogLevel::DEBUG, "is_on_fat: Failed statfs on \"{}\": {}\n", path.string(), strerror(orig_errno));
+        log(LogLevel::NOTICE, "is_on_fat: Failed statfs on \"{}\": {}\n", path.string(), strerror(orig_errno));
         return false;
     }
 
@@ -114,7 +114,7 @@ bool is_dos_attrs_in_extended_supported(const std::filesystem::path & path) {
         if (orig_errno == ENOATTR) {
             return true;
         }
-        log(LogLevel::DEBUG,
+        log(LogLevel::INFO,
             "is_dos_attrs_in_extended_supported: Failed to fetch attributes of \"{}\": {}\n",
             path.string(),
             strerror(orig_errno));

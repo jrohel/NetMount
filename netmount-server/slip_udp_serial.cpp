@@ -239,7 +239,7 @@ uint16_t SlipUdpSerial::recv_decode_slip() {
         }
 
         if (len == rx_buffer.size()) {
-            log(LogLevel::ERROR,
+            log(LogLevel::WARNING,
                 "SlipUdpSerial::recv_decode_slip: Received data length bigger than buffer size (MTU = {})\n",
                 MTU);
             return 0;
@@ -273,7 +273,7 @@ std::uint16_t SlipUdpSerial::parse_udp_packet(std::uint16_t rx_packet_len) {
     auto * headers = reinterpret_cast<const net_headers *>(rx_buffer.data());
 
     if ((headers->ipv4.version_ihl & 0xF0) != (4 << 4)) {
-        log(LogLevel::NOTICE, "SlipUdpSerial::parse_udp_packet: Received datagram is not a IPv4 packet\n");
+        log(LogLevel::INFO, "SlipUdpSerial::parse_udp_packet: Received datagram is not a IPv4 packet\n");
         return 0;
     }
     if ((headers->ipv4.version_ihl & 0x0F) != (sizeof(ipv4_hdr) / 4)) {
@@ -290,7 +290,7 @@ std::uint16_t SlipUdpSerial::parse_udp_packet(std::uint16_t rx_packet_len) {
     }
 
     if (headers->ipv4.protocol != IPV4_PROTOCOL_UDP) {
-        log(LogLevel::DEBUG, "SlipUdpSerial::parse_udp_packet: Received datagram is not a UDP packet\n");
+        log(LogLevel::INFO, "SlipUdpSerial::parse_udp_packet: Received datagram is not a UDP packet\n");
         return 0;
     }
 

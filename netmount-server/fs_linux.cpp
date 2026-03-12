@@ -18,7 +18,7 @@ bool is_dos_attrs_native_supported(const std::filesystem::path & path) {
     const auto fd = open(path.c_str(), O_RDONLY);
     auto orig_errno = errno;
     if (fd == -1) {
-        log(LogLevel::ERROR,
+        log(LogLevel::NOTICE,
             "is_dos_attr_native_supported: Cannot open file \"{}\": {}\n",
             path.string(),
             strerror(orig_errno));

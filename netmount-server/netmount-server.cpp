@@ -257,7 +257,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
     int reply_packet_len = 0;
 
     if ((reqdrv < 2) || (reqdrv >= drives.size())) {
-        log(LogLevel::ERROR, "Requested invalid drive number: {:d}\n", reqdrv);
+        log(LogLevel::WARNING, "Requested invalid drive number: {:d}\n", reqdrv);
         return -1;
     }
 
@@ -785,7 +785,7 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
                 std::error_code ec;
                 if (!std::filesystem::is_directory(server_directory)) {
                     return_code = DOS_EXTERR_PATH_NOT_FOUND;
-                    log(LogLevel::WARNING,
+                    log(LogLevel::INFO,
                         "OPEN/CREATE/EXTENDED_OPEN_CREATE: ({}) Parent path is not a directory: \"{}\"\n",
                         return_code,
                         server_directory.string());
@@ -1160,7 +1160,7 @@ int parse_share_definition(std::string_view share) {
         if (option == "label") {
             const auto value = get_token(share, ',', ++offset);
             if (!value.empty()) {
-                log(LogLevel::INFO, "Set volume label to \"{}\" for drive {:c}\n", value, drive_char);
+                log(LogLevel::NOTICE, "Set volume label to \"{}\" for drive {:c}\n", value, drive_char);
                 drive.set_volume_label(value);
             }
             is_volume_label_defined = true;
@@ -1169,7 +1169,7 @@ int parse_share_definition(std::string_view share) {
         if (option == "name_conversion") {
             const auto value = get_token(share, ',', ++offset);
             auto upper_value = string_ascii_to_upper(value);
-            log(LogLevel::INFO,
+            log(LogLevel::NOTICE,
                 "Set filename conversion method for drive \"{:c}\" path \"{}\" to \"{}\"\n",
                 drive_char,
                 drive.get_root().string(),
@@ -1187,7 +1187,7 @@ int parse_share_definition(std::string_view share) {
         }
         if (option == "readonly") {
             const auto value = get_token(share, ',', ++offset);
-            log(LogLevel::INFO,
+            log(LogLevel::NOTICE,
                 "Set read-only mode for drive \"{:c}\" path \"{}\" to \"{}\"\n",
                 drive_char,
                 drive.get_root().string(),
@@ -1205,7 +1205,7 @@ int parse_share_definition(std::string_view share) {
         }
         if (option == "client_timestamp") {
             const auto value = get_token(share, ',', ++offset);
-            log(LogLevel::INFO,
+            log(LogLevel::NOTICE,
                 "Client timestamp is {} for drive \"{:c}\" path \"{}\"",
                 drive.get_use_client_timestamp() ? "enabled" : "disabled",
                 drive_char,
@@ -1226,7 +1226,7 @@ int parse_share_definition(std::string_view share) {
     }
 
     if (!is_volume_label_defined) {
-        log(LogLevel::INFO, "Using default volume label \"{}\" for drive {:c}\n", DEFAULT_VOLUME_LABEL, drive_char);
+        log(LogLevel::NOTICE, "Using default volume label \"{}\" for drive {:c}\n", DEFAULT_VOLUME_LABEL, drive_char);
         drive.set_volume_label(DEFAULT_VOLUME_LABEL);
     }
 
@@ -1478,7 +1478,7 @@ int main(int argc, char ** argv) {
                 }
                 if (slip->get_last_dst_port() != bind_port) {
                     // Not our UDP port. Ignore packet and continue.
-                    log(LogLevel::NOTICE,
+                    log(LogLevel::INFO,
                         "slip->receive(): Ignoring received UDP packet on port {}, listening on {}\n",
                         slip->get_last_dst_port(),
                         bind_port);
@@ -1499,7 +1499,7 @@ int main(int argc, char ** argv) {
                     last_remote_port);
 
                 if (request_packet_len < static_cast<int>(sizeof(struct drive_proto_hdr))) {
-                    log(LogLevel::ERROR,
+                    log(LogLevel::WARNING,
                         "received a truncated/malformed packet from {}:{}\n",
                         last_remote_ip_str,
                         last_remote_port);
@@ -1510,7 +1510,7 @@ int main(int argc, char ** argv) {
             // check the protocol version
             auto * const header = reinterpret_cast<const drive_proto_hdr *>(request_packet);
             if (header->version != DRIVE_PROTO_VERSION) {
-                log(LogLevel::ERROR,
+                log(LogLevel::WARNING,
                     "unsupported protocol version {:d} from {}:{}\n",
                     header->version,
                     last_remote_ip_str,
@@ -1522,12 +1522,18 @@ int main(int argc, char ** argv) {
 
             const uint16_t length_from_header = from_little16(header->length_flags) & 0x7FF;
             if (length_from_header < sizeof(struct drive_proto_hdr)) {
-                log(LogLevel::ERROR, "received a malformed packet from {}:{}\n", last_remote_ip_str, last_remote_port);
+                log(LogLevel::WARNING,
+                    "received a malformed packet from {}:{}\n",
+                    last_remote_ip_str,
+                    last_remote_port);
                 continue;
             }
             if (length_from_header > request_packet_len) {
                 // corupted/truncated packet
-                log(LogLevel::ERROR, "received a truncated packet from {}:{}\n", last_remote_ip_str, last_remote_port);
+                log(LogLevel::WARNING,
+                    "received a truncated packet from {}:{}\n",
+                    last_remote_ip_str,
+                    last_remote_port);
                 continue;
             } else {
                 if (request_packet_len != length_from_header) {
@@ -1554,7 +1560,7 @@ int main(int argc, char ** argv) {
 #ifdef SIMULATE_PACKET_LOSS
             // simulated random input packet LOSS
             if ((rand() & 31) == 0) {
-                log(LogLevel::ERROR, "Simulate incoming packet loss!\n");
+                log(LogLevel::WARNING, "Simulate incoming packet loss!\n");
                 continue;
             }
 #endif
@@ -1567,7 +1573,7 @@ int main(int argc, char ** argv) {
                                           reinterpret_cast<const uint8_t *>(header)));
                 const uint16_t cksum_remote = from_little16(header->checksum);
                 if (cksum_mine != cksum_remote) {
-                    log(LogLevel::ERROR,
+                    log(LogLevel::WARNING,
                         "CHECKSUM MISMATCH! Computed: 0x{:04X} Received: 0x{:04X}\n",
                         cksum_mine,
                         cksum_remote);
@@ -1576,7 +1582,7 @@ int main(int argc, char ** argv) {
             } else {
                 const uint16_t recv_magic = from_little16(header->checksum);
                 if (recv_magic != DRIVE_PROTO_MAGIC) {
-                    log(LogLevel::ERROR,
+                    log(LogLevel::WARNING,
                         "Bad MAGIC! Expected: 0x{:04X} Received: 0x{:04X}\n",
                         DRIVE_PROTO_MAGIC,
                         recv_magic);
@@ -1596,7 +1602,7 @@ int main(int argc, char ** argv) {
 #ifdef SIMULATE_PACKET_LOSS
             // simulated random ouput packet LOSS
             if ((rand() & 31) == 0) {
-                log(LogLevel::ERROR, "Simulate outgoing packet loss!\n");
+                log(LogLevel::WARNING, "Simulate outgoing packet loss!\n");
                 continue;
             }
 #endif

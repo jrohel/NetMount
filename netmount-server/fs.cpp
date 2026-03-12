@@ -800,14 +800,14 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
                 } catch (const std::runtime_error &) {
                 }
                 if (attrs & FAT_RO) {
-                    log(LogLevel::WARNING,
+                    log(LogLevel::NOTICE,
                         "Access denied: File \"{}\" has the READ_ONLY attribute",
                         dentry.path().string());
                     continue;
                 }
                 std::error_code ec;
                 if (!std::filesystem::remove(dentry.path(), ec)) {
-                    log(LogLevel::ERROR, "delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
+                    log(LogLevel::NOTICE, "delete_files: Failed to delete file \"{}\": {}\n", path_str, ec.message());
                 }
             }
         }
@@ -832,13 +832,13 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
             } catch (const std::runtime_error &) {
             }
             if (attrs & FAT_RO) {
-                log(LogLevel::WARNING, "Access denied: File \"{}\" has the READ_ONLY attribute", path.string());
+                log(LogLevel::NOTICE, "Access denied: File \"{}\" has the READ_ONLY attribute", path.string());
                 continue;
             }
             try {
                 netmount_srv::delete_file(path);
             } catch (const std::runtime_error & ex) {
-                log(LogLevel::ERROR, "delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
+                log(LogLevel::NOTICE, "delete_files: Failed to delete file \"{}\": {}\n", path.string(), ex.what());
             }
         }
     }
@@ -920,7 +920,7 @@ int32_t Drive::Item::create_directory_list(const Drive & drive) {
                 std::error_code ec;
                 const bool is_root_dir = std::filesystem::equivalent(path, drive.get_root(), ec);
                 if (ec) {
-                    log(LogLevel::ERROR, "create_directory_list: {}\n", ec.message());
+                    log(LogLevel::WARNING, "create_directory_list: {}\n", ec.message());
                     return -1;
                 }
                 if (is_root_dir) {
@@ -1184,7 +1184,7 @@ uint8_t get_path_dos_properties(
         }
         return attrs;
     } catch (const std::runtime_error & ex) {
-        log(LogLevel::ERROR, "get_path_dos_properties: {}\n", ex.what());
+        log(LogLevel::DEBUG, "get_path_dos_properties: {}\n", ex.what());
     }
 
     return FAT_ERROR_ATTR;
@@ -1290,7 +1290,7 @@ DosFileProperties create_or_truncate_file(const std::filesystem::path & path, ui
         try {
             set_item_attrs(path, attrs, mode);
         } catch (const std::runtime_error & ex) {
-            log(LogLevel::ERROR,
+            log(LogLevel::WARNING,
                 "create_or_truncate_file: Failed to set attribute 0x{:02X} to \"{}\": {}\n",
                 attrs,
                 path.string(),
