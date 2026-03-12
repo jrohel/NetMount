@@ -1,3 +1,59 @@
+# 1.8.0 (2026-03-12)
+
+## Features
+
+- **send updated file timestamp to server on close**
+
+    Upon closing a file, the NetMount client checks whether the file's
+    timestamp has changed since it was opened - for example, if DOS
+    updated the file timestamp. If the NetMount server supports extended
+    features, the client sends the updated timestamp to the server.
+
+    The server can then apply this timestamp, depending on its
+    configuration, to set the file's last-write time.
+
+- **add support for DISK_INFO_LARGE request (up to 256 TiB)**
+
+    Original DISK_INFO request is limited to 2 GiB - 32 KiB due to
+    16-bit total_clusters and available_clusters fields.
+
+    DISK_INFO_LARGE is a newly added request in DOS network redirectors,
+    supported by newer DOS implementations (e.g., FreeDOS Kernel 2044 /
+    version 2.44, 2026). It uses 32-bit total_clusters and available_clusters,
+    allowing reporting of disks up to 256 TiB - 64 KiB. Original DISK_INFO
+    behavior remains unchanged.
+
+    If the NetMount server does not support DISK_INFO_LARGE, the client
+    falls back to using the original DISK_INFO request.
+
+## Other
+
+- **Add has_drive_extended_features to shared_data**
+
+    Adds a bit in the shared_data structure indicating whether a
+    particular NetMount server supports extended features.
+
+    The client ABI version has been increased to 2, with a minimum
+    compatible version remaining 1.
+
+    The has_drive_extended_features bit field was deliberately placed
+    at the end of the shared_data structure to preserve the layout
+    of existing fields and maintain backward ABI compatibility.
+
+- **Initialize has_drive_extended_features from server responses**
+
+    When a NetMount client connects to a remote share, it initially sets
+    the corresponding bit in has_drive_extended_features to 0. This is
+    the safe default, indicating that extended features are not assumed
+    to be supported until the client has confirmed them.
+
+    As communication with the server proceeds, the server indicates in
+    its responses whether extended features are supported. The client
+    updates the has_drive_extended_features bit accordingly to reflect
+    the actual server capabilities.
+
+----
+
 # 1.7.1 (2026-02-18)
 
 ## Fixes
