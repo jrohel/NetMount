@@ -17,7 +17,7 @@ In addition to these core components, the NetMount project includes supporting u
 ## `netmount` (DOS Client)
 
 - A TSR driver for DOS that allows mounting shared directories from one or more remote machines as local drives.
-- It should work with MS-DOS 5.0 and newer and with sufficiently compatible systems such as FreeDOS.
+- Works with FreeDOS, MS-DOS 5.0 and newer, and sufficiently compatible DOS kernels such as Enhanced DR-DOS (used in SvarDOS).
 - Has minimal dependencies - only a DOS Packet Driver class 1 (Ethernet II) is required.
 - Implements Ethernet Type II frame, ARP, IPv4, UDP and its own NetMount protocol.
 - Supports any network interface for which a DOS Packet Driver class 1 (Ethernet II) is available. This includes Ethernet adapters, as well as serial, parallel, and other interfaces supported through appropriate drivers.
@@ -135,16 +135,16 @@ I would like to mention https://mirror.cs.msu.ru/oldlinux.org/Linux.old/docs/int
 RBIL (Ralf Brown’s Interrupt List) and the source code of etherdfs-server and etherdfs-client. However, my thanks go to the authors of all the useful resources that I found on the Internet. Thank you.
 
 ----
-## Development & Testing
-### DOS Client:
-- **Build:** Compiled using Open Watcom v2.
-- **Emulated environment testing:** Tested with DOSEMU on Linux.
-- **Real hardware testing:** Tested on MS-DOS 6.22 and FreeDOS 1.3.
+## Building & Testing
+### DOS NetMount client and utilities:
+- **Build:** Cross-compiled on Linux using Open Watcom v2.
+- **Emulated environment testing:** Tested with QEMU using Linux KVM acceleration.
+- **Tested DOS systems:** FreeDOS 1.4 (kernel 2043), FreeDOS 1.4 (kernel 2044), MS-DOS 5.0, MS-DOS 6.0, MS-DOS 6.22, MS-DOS 7.1, and SvarDOS (Enhanced DR-DOS kernel 20250427).
 - **Serial communication testing:** Using the ethersl.com SLIP packet driver from Crynwr.
 
-### Server:
-- **POSIX version:** Compiled on Linux and FreeBSD. Tested on Linux.
-- **Windows version:** Cross-compiled on Linux using MinGW. Tested with Wine on Linux.
+### NetMount server:
+- **POSIX version:** Compiled on Linux, FreeBSD, and macOS 15 (ARM64). Tested on Linux.
+- **Windows version:** Cross-compiled on Linux using MinGW. Tested on multiple Windows versions, as well as on Wine (Linux) and ReactOS.
 
 ----
 ## License
