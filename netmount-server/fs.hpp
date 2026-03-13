@@ -172,7 +172,8 @@ public:
     /// Creates or truncates a file `server_path` with attributes `attrs`.
     /// Returns properties of created/truncated file.
     /// Throws exception on error.
-    DosFileProperties create_or_truncate_file(const std::filesystem::path & server_path, uint8_t requested_attrs, uint8_t current_attrs);
+    DosFileProperties create_or_truncate_file(
+        const std::filesystem::path & server_path, uint8_t requested_attrs, uint8_t current_attrs);
 
     /// Try to open a file, then close it.
     void try_open_file(const std::filesystem::path & server_path, uint8_t open_mode, uint8_t current_attrs);
