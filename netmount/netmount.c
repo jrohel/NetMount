@@ -1740,7 +1740,7 @@ static void __declspec(naked) int2F_redirector(void) {
         // return pointer to shared data in cx:bx
         mov cx, cs
         mov bx, offset cs:shared_data
-        not_get_shared_data:
+    not_get_shared_data:
         iret
 
     not_global_my_2Fmux_id:
@@ -1758,7 +1758,7 @@ static void __declspec(naked) int2F_redirector(void) {
         cmp al, INT2F_DISK_INFO_LARGE
         je get_drive
         cmp al, 0x2E
-        jg jmp_to_prev_handler2
+        ja jmp_to_prev_handler2
         push bx
         xor bh, bh
         mov bl, al
@@ -1780,9 +1780,9 @@ static void __declspec(naked) int2F_redirector(void) {
         cmp al, INT2F_EXTENDED_ATTRS
         je es_di_points_SFT
         cmp al, INT2F_CLOSE_FILE
-        jl other_states
+        jb other_states
         cmp al, INT2F_UNLOCK_FILE
-        jg other_states
+        ja other_states
 
     es_di_points_SFT:
         // ES:DI points to the SFT: if the bottom 6 bits of the device information
@@ -1839,7 +1839,7 @@ static void __declspec(naked) int2F_redirector(void) {
     validate_drive_no:
         // test if the drive is in our mount table?
         cmp bl, MAX_DRIVES_COUNT
-        jge invalid_drive_no
+        jae invalid_drive_no
         push bx
         xor bh, bh
         lea bx, [shared_data + DRIVE_MAP_OFFSET + bx]
