@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2025 Jaroslav Rohel, jaroslav.rohel@gmail.com
+// Copyright 2025-2026 Jaroslav Rohel, jaroslav.rohel@gmail.com
 
 #include "unicode_to_ascii.hpp"
 
@@ -133,6 +133,8 @@ void load_transliteration_map(const std::filesystem::path & filename) {
 }
 
 
+#ifndef _WIN32
+
 // Convert UTF-8 string to ASCII
 std::string convert_utf8_to_ascii(const std::string & input) {
     std::string result;
@@ -177,6 +179,7 @@ std::string convert_utf8_to_ascii(const std::string & input) {
     return result;
 }
 
+#else
 
 // Convert Windows UTF-16 string to ASCII
 std::string convert_windows_unicode_to_ascii(const std::wstring & input) {
@@ -219,3 +222,5 @@ std::string convert_windows_unicode_to_ascii(const std::wstring & input) {
 
     return result;
 }
+
+#endif
