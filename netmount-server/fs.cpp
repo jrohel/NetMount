@@ -190,6 +190,29 @@ bool is_dangling_symlink(const std::filesystem::path & p) {
     return false;
 }
 
+
+// Computes the canonical depth of a filesystem path.
+// Returns:
+//  - depth >= 0 : number of logical components
+//  - -1 : the path escapes above the root
+int check_path_depth(const std::filesystem::path & p) {
+    int depth = 0;  // tracks the "depth" relative to the virtual root
+    for (const auto & part : p) {
+        if (part.empty() || part == "." || part == "/") {
+            continue;  // ignore empty parts and current directory references
+        }
+        if (part == "..") {
+            if (depth == 0) {
+                return -1;  // escape above root
+            }
+            --depth;
+        } else {
+            ++depth;  // normal directory component, increase depth
+        }
+    }
+    return depth;
+}
+
 }  // namespace
 
 
@@ -565,6 +588,12 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
 
     if (client_path.empty()) {
         return {root, true};
+    }
+
+    if (check_path_depth(client_path) < 0) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted path traversal outside root", __func__),
+            DOS_EXTERR_PATH_NOT_FOUND);
     }
 
     if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
