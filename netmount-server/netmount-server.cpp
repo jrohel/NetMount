@@ -783,6 +783,13 @@ int process_request(ReplyCache::ReplyInfo & reply_info, const uint8_t * request_
             const auto relative_path = create_relative_path(request_data + 6, request_data_len - 6);
             try {
                 const auto [server_path, exist] = drive.create_server_path(relative_path);
+
+                if (server_path == drive.get_root()) {
+                    throw FilesystemError(
+                        std::format("{}: Security alert: client attempted file operation on root directory", __func__),
+                        DOS_EXTERR_ACCESS_DENIED);
+                }
+
                 const auto server_directory = server_path.parent_path();
 
                 log(LogLevel::DEBUG,

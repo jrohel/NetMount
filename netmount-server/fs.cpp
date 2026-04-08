@@ -590,10 +590,14 @@ std::pair<std::filesystem::path, bool> Drive::create_server_path(
         return {root, true};
     }
 
-    if (check_path_depth(client_path) < 0) {
+    auto client_path_depth = check_path_depth(client_path);
+    if (client_path_depth < 0) {
         throw FilesystemError(
             std::format("{}: Security alert: client attempted path traversal outside root", __func__),
             DOS_EXTERR_PATH_NOT_FOUND);
+    }
+    if (client_path_depth == 0) {
+        return {root, true};
     }
 
     if (get_file_name_conversion() == Drive::FileNameConversion::OFF) {
@@ -638,6 +642,12 @@ void Drive::make_dir(const std::filesystem::path & client_path) {
 
     auto [server_path, exist] = create_server_path(client_path);
 
+    if (server_path == get_root()) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted to create root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     if (exist) {
         throw FilesystemError("make_dir: Path exists: " + server_path.string(), DOS_EXTERR_ACCESS_DENIED);
     }
@@ -655,6 +665,12 @@ void Drive::delete_dir(const std::filesystem::path & client_path) {
     }
 
     auto [server_path, exist] = create_server_path(client_path);
+
+    if (server_path == get_root()) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted to remove root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
 
     if (!exist) {
         throw FilesystemError(
@@ -692,6 +708,12 @@ void Drive::set_item_attrs(const std::filesystem::path & client_path, uint8_t at
     if (attrs_mode != AttrsMode::IGNORE) {
         auto [server_path, exist] = create_server_path(client_path);
 
+        if (server_path == get_root()) {
+            throw FilesystemError(
+                std::format("{}: Security alert: client attempted to set attributes of root directory", __func__),
+                DOS_EXTERR_ACCESS_DENIED);
+        }
+
         netmount_srv::set_item_attrs(server_path, attrs, attrs_mode);
 
         // Recreates directory_list
@@ -707,6 +729,13 @@ uint8_t Drive::get_server_path_attrs(const std::filesystem::path & server_path) 
 
 uint8_t Drive::get_dos_properties(const std::filesystem::path & client_path, DosFileProperties * properties) {
     auto [server_path, exist] = create_server_path(client_path);
+
+    if (server_path == get_root()) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted to get attributes of root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     if (!exist) {
         throw FilesystemError(
             std::format("get_dos_properties: File not found: {}", server_path.string()), DOS_EXTERR_FILE_NOT_FOUND);
@@ -736,6 +765,12 @@ void Drive::rename_file(const std::filesystem::path & old_client_path, const std
 
     const auto [old_server_path, exist1] = create_server_path(old_client_path);
 
+    if (old_server_path == get_root()) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted to rename root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     std::filesystem::path new_server_path;
     bool exist2;
     try {
@@ -761,6 +796,13 @@ void Drive::rename_file(const std::filesystem::path & old_client_path, const std
         }
         throw;
     }
+    if (new_server_path == get_root()) {
+        throw FilesystemError(
+            std::format(
+                "{}: Security alert: client attempted to rename a file or directory to the root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
+
     if (exist2) {
         throw FilesystemError(
             std::format("Access denied: Destination file \"{}\" already exists", new_server_path.string()),
@@ -780,6 +822,12 @@ void Drive::delete_files(const std::filesystem::path & client_pattern) {
     }
 
     const auto [server_path, exist] = create_server_path(client_pattern);
+
+    if (server_path == get_root()) {
+        throw FilesystemError(
+            std::format("{}: Security alert: client attempted to remove root directory", __func__),
+            DOS_EXTERR_ACCESS_DENIED);
+    }
 
     if (exist) {
         uint8_t attrs = 0;
