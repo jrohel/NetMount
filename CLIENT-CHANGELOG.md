@@ -1,3 +1,36 @@
+# 1.8.1 (2026-03-16)
+
+## Other
+
+- **use unsigned comparisons in int2F_redirector**
+
+    If the redirector does not handle a requested function, control is
+    passed to the next INT 0x2F handler. This also applies to network
+    requests for disks managed by the redirector, which typically end
+    in DOS returning "function number invalid."
+
+    Function numbers are bytes. The redirector previously used the signed
+    "JG" instruction to check whether the requested function was outside its
+    table. This worked fine for network redirector functions, which were
+    always <127 (positive in signed logic).
+
+    FreeDOS Kernel 2044 (v2.44, 2026) introduced a new function 0xA3 to
+    report total and free sizes of disks larger than 2 GiB (up to 256 TiB).
+    Interpreted as a negative number in signed comparison, it appeared
+    within the table and was incorrectly treated as supported. However,
+    the function handler was missing, so the redirector did nothing, leaving
+    registers unchanged and reporting an incorrect disk size.
+
+    NetMount client 1.8.0 added support for 0xA3. However, without this fix,
+    any future function with code 128 and above could trigger the same
+    problem.
+
+    This fix replaces all signed conditional jumps in int2F_redirector
+    with unsigned versions, fixing function detection and preventing
+    misinterpretation of function codes 128 and above.
+
+----
+
 # 1.8.0 (2026-03-12)
 
 ## Features
