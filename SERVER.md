@@ -54,12 +54,12 @@ Options:
 
 **Advanced sharing of two directories**
 
-`netmount-server --bind-addr=192.168.200.1 C=/srv/dos_programs,name_conversion=OFF,readonly=1 D=/srv/data`
+`netmount-server --bind-addr=192.168.200.1 C=/srv/dos_programs,name_conversion=OFF 'D=/share_with\,comma,readonly=1'`
 
 - Listens only on IP address `192.168.200.1` using the default port `12200`
-- Filename conversion is enabled only for `D` and disabled for `C` (e.g., "/srv/dos_programs" uses
+- Long to DOS 8.3 filename conversion (mapping) is disabled for `C` (e.g., "/srv/dos_programs" uses
   a DOS-compatible filesystem with short filenames and is case-insensitive)
-- `C` is shared as read-only
+- `D` is shared as read-only
 
 **Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
 
@@ -83,7 +83,9 @@ netmount-server D=/home/user/net                          # Share the mounted co
 
 **Sharing a Directory as Drive C and Drive E as Drive D**
 
-`netmount-server.exe C=C:\INSTALL D=E:`
+`netmount-server.exe C=C:\\INSTALL D=E:\\`
+
+- '\' is used as an escape character and must be doubled
 
 **Sharing the Current Working Directory**
 
@@ -91,7 +93,7 @@ netmount-server D=/home/user/net                          # Share the mounted co
 
 **Sharing a Directory as Drive D using SLIP (Serial Line Internet Protocol) over a serial port**
 
-`netmount-server.exe --slip-dev=COM2 --slip-speed=115200 D=C:\INSTALL`
+`netmount-server.exe --slip-dev=COM2 --slip-speed=115200 D=C:\\INSTALL`
 
 - Uses SLIP over the serial port `COM2` at a baud rate of `115200` Bd.
 - Listens on all IP addresses and uses the default port `12200`
@@ -198,7 +200,8 @@ Where `<storage_method>` can be one of:
 
 ### Extended Attributes (`EXTENDED` Method)
 
-When using the `EXTENDED` method, DOS attributes are encoded into a single byte and stored as an **extended attribute** named `"user.NetMountAttrs"`. This allows storing DOS attributes even on file systems that do not support them natively, as long as extended attributes are supported.
+When using the `EXTENDED` method, DOS attributes are encoded into a single byte and stored as an **extended attribute** named `"user.NetMountAttrs"`.
+This allows storing DOS attributes even on file systems that do not support them natively, as long as extended attributes are supported.
 
 Behavior:
 
@@ -233,9 +236,9 @@ various filename restrictions must be taken into account, as NetMount supports D
   conversion of national characters depends on the current codepage. Unix-based systems typically have
   case-sensitive file names. Therefore, netmount-server performs case conversion on file names.
   On the server, file names are created in lowercase. Existing files with uppercase ASCII characters
-  are converted. National characters are omitted because they cannot be converted without knowledge
+  are converted. The case of national characters stays unchanged because they cannot be converted without knowledge
   of the DOS client's codepage. When name conversion is turned off (argument `name_conversion=OFF`),
-  files with uppercase characters in their names cannot be accessed. Disable this only if you are using
+  files with uppercase characters in their names cannot be accessed. Disable name conversion only if you are using
   a case-insensitive filesystem or are certain the files will only have lowercase names.
 
 - **National characters:** Modern filesystems support Unicode. DOS Short Names encode characters in 8 bits,
@@ -246,9 +249,9 @@ various filename restrictions must be taken into account, as NetMount supports D
   are passed unchanged, which is typically not suitable, as the client’s codepage may differ
   from the encoding used on the server. It is ideal to use only ASCII characters in file names.
 
-- **DOS further disallows certain control and special characters in file names:** ('', '/', ':', '*',
-  '?', '"', '<', '>', '|'). These are omitted during conversion. When conversion is disabled (argument
-  `name_conversion=OFF`), these characters are passed unchanged, which may cause issues.
+- **DOS also disallows certain control and special characters in file names:** ('\', '/', ':', '*',
+  '?', '"', '<', '>', '|'). These are replaced with '_' during conversion. When conversion is disabled
+  (argument `name_conversion=OFF`), these characters are passed unchanged, which may cause issues.
 
 
 ## Security
