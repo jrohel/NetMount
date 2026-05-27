@@ -573,8 +573,18 @@ const std::filesystem::path & Drive::get_server_name(
     if (create_directory_list || item.directory_list.empty()) {
         item.create_directory_list(*this);
     }
-    for (auto & dir : item.directory_list) {
+    auto & directory_list = item.directory_list;
+    for (auto it = directory_list.begin(); it != directory_list.end(); ++it) {
+        auto & dir = *it;
         if (dir.attrs != FAT_VOLUME && dir.fcb_name == fcb_name) {
+            auto server_path = item.path / dir.server_name;
+            if (!std::filesystem::exists(server_path) && !std::filesystem::is_symlink(server_path)) {
+                // The entry exists in the directory list, but the file no longer exists on disk.
+                // Remove the stale entry from the directory list.
+                directory_list.erase(it);
+                item.fcb_names.erase(fcb_name);
+                return empty_path;
+            }
             return dir.server_name;
         }
     }
