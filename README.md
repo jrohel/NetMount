@@ -92,7 +92,7 @@ Arguments:
 
 ### Usage:
 ```
-./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT]
+./netmount-server [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT>]
 [--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>]
 [--translit-map-path=<PATH>] [--log-level=<LEVEL>]
 <drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]

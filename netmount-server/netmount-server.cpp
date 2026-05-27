@@ -1024,7 +1024,7 @@ void print_help(const char * program_name) {
     print(stdout, "Usage:\n");
     print(
         stdout,
-        "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT] "
+        "{} [--help] [--bind-addr=<IP_ADDR>] [--bind-port=<UDP_PORT>] "
         "[--slip-dev=<SERIAL_DEVICE> --slip-speed=<BAUD_RATE>] [--slip-rts-cts=<ENABLED>] "
         "[--translit-map-path=<PATH>] [--log-level=<LEVEL>] "
         "<drive>=<root_path>[,attrs=<storage_method>][,label=<volume_label>][,name_conversion=<method>]"
