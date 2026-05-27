@@ -24,7 +24,7 @@
 #include <string>
 #include <string_view>
 
-#define PROGRAM_VERSION "1.8.0"
+#define PROGRAM_VERSION "1.8.1"
 
 // structs are packed
 #pragma pack(1)

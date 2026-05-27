@@ -1,3 +1,63 @@
+# 1.8.1 (2026-05-27)
+
+## Security
+
+- **Check client path for path traversal attacks**
+
+    When `name_conversion=OFF`, only minimal modifications are applied to the
+    client-supplied path (lowercasing). This could be exploited by an attacker
+    crafting a request with a path containing `..` to escape the shared
+    directory (path traversal attack).
+
+    The client path is now validated before being mapped to the server path
+    (for all `name_conversion` modes). If an attempt to escape the shared
+    directory is detected, the request is rejected with "path not found" and a
+    security alert is logged.
+
+- **Check for operation on root directory**
+
+    An attacker may attempt (by crafting a request) to manipulate the shared
+    directory itself — for example, delete it or read/modify its attributes.
+    The only legitimate operation on the shared directory root is `chdir`.
+
+    Operations are now checked to detect forbidden manipulation of the shared
+    directory. If such an attempt is detected, the request is rejected with
+    "access denied" and a security alert is logged.
+
+## Fixes
+
+- **Fix `Drive::get_server_name`: remove stale directory list entry**
+
+    If an entry was present in the in-memory directory list but the
+    corresponding file no longer existed on disk, the server would return a
+    path to a non-existent file.
+
+    The stale entry and the corresponding `fcb_names` entry are now removed
+    from the directory list, and an empty path is returned instead.
+
+## Other
+
+- **SERVER.md: document backslash escaping in shared path definitions**
+
+    The `\` character is used as an escape character in shared path definitions
+    and must be doubled (e.g., `C:\\INSTALL` instead of `C:\INSTALL`).
+    An example showing a path containing a `,` character was also added
+    (`D=/share_with\,comma`).
+
+- **Optimize `unicode_to_ascii` with conditional compilation**
+
+    Use conditional compilation to include only the relevant conversion
+    function:
+    - `convert_utf8_to_ascii` is used on non-Windows platforms
+    - `convert_windows_unicode_to_ascii` is used only on Windows platforms
+
+- **Fix missing closing bracket in `[--bind-port=<UDP_PORT>]`**
+
+    The usage string in the help output, `README.md`, and `SERVER.md` was
+    missing the closing `>` bracket in `[--bind-port=<UDP_PORT>]`.
+
+----
+
 # 1.8.0 (2026-03-12)
 
 ## Features
