@@ -596,9 +596,9 @@ static void send_arp_request(uint8_t local_drive) {
     // The rest of the ARP frame is constant and was filled in during program initialization.
     frame->arp.target_protocol_addr = target_ip_addr;
 
-    // Lowest 16 bits of timer. The default frequency is 18.2 Hz.
+    // Pointer to lowest 16 bits of timer. The default frequency is 18.2 Hz.
     // Warning: this location won't increment while interrupts are disabled!
-    volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
+    volatile uint16_t __far * const time_ptr = (uint16_t __far *)0x46C;
 
     // It sends an ARP request and waits until the destination HW address is known or time expires.
     // If the destination HW address is still not known, sends the ARP request again and again
@@ -608,9 +608,9 @@ static void send_arp_request(uint8_t local_drive) {
         send_frame(length, frame);
 
         // Wait until the destination HW address is known (different from the "broadcast" address).
-        const uint16_t wait_start_time = *time;
+        const uint16_t wait_start_time = *time_ptr;
         const uint16_t timeout_ticks = (ARP_REQUEST_RCV_TMO_SEC * 182) / 10;
-        while (*time - wait_start_time <= timeout_ticks) {
+        while (*time_ptr - wait_start_time <= timeout_ticks) {
             // Check that the destination HW address is known. If yes, we are done.
             for (int i = 0; i < sizeof(struct mac_addr); ++i) {
                 if (ip_to_mac_map->mac_addr.bytes[i] != 0xFF) {
@@ -715,8 +715,8 @@ static uint16_t send_request(
     // maximum configured request retries for the processed drive
     const uint8_t max_request_retries = drv_info->max_request_retries;
 
-    // lowest 16 bits of timer. Warning: this location won't increment while interrupts are disabled!
-    volatile uint16_t __far * const time = (uint16_t __far *)0x46C;
+    // Pointer to lowest 16 bits of timer. Warning: this location won't increment while interrupts are disabled!
+    volatile uint16_t __far * const time_ptr = (uint16_t __far *)0x46C;
 
     // Send the request and wait for a response for the minimum configured timeout.
     // If no response is received, send the request again and again, up to configured maximum.
@@ -728,8 +728,8 @@ static uint16_t send_request(
         // wait for (and validate) the answer frame
         const struct drive_proto_hdr * const rcv_drive_proto =
             (struct drive_proto_hdr *)((struct ether_frame *)global_recv_buff)->udp_data;
-        for (const uint16_t rcv_start_time = *time;;) {
-            if (*time - rcv_start_time > rcv_tmo_18_2_ticks) {
+        for (const uint16_t rcv_start_time = *time_ptr;;) {
+            if (*time_ptr - rcv_start_time > rcv_tmo_18_2_ticks) {
                 // timeout, extend the timeout *2, but do not exceed the configured maximum
                 rcv_tmo_18_2_ticks <<= 1;
                 if (rcv_tmo_18_2_ticks > max_rcv_tmo_18_2_ticks) {
@@ -839,11 +839,11 @@ static void handle_request_for_our_drive(void) {
 
     volatile int16_t * const recvbufflen_ptr = getptr_global_recv_data_len();
 
-    // Timer. The default frequency is 18.2 Hz.
-    volatile uint32_t __far * const time = (uint32_t __far *)0x46C;
+    // Pointer to timer. The default frequency is 18.2 Hz.
+    volatile uint32_t __far * const time_ptr = (uint32_t __far *)0x46C;
 
     struct file_buffer * const read_buffer = getptr_read_file_buffer();
-    if (read_buffer->valid_bytes > 0 && *time - read_buffer->timestamp > 5 * 18) {
+    if (read_buffer->valid_bytes > 0 && *time_ptr - read_buffer->timestamp > 5 * 18) {
         // Keep file_buffer data valid for no more than 5 seconds.
         read_buffer->valid_bytes = 0;
     }
@@ -1030,7 +1030,7 @@ static void handle_request_for_our_drive(void) {
                         read_buffer->start_cluster = sftptr->start_cluster;
                         read_buffer->offset = buffer_offset;
                         read_buffer->valid_bytes = read_offset + len - buffer_offset;
-                        read_buffer->timestamp = *time;
+                        read_buffer->timestamp = *time_ptr;
                         my_memcpy_ff(
                             read_buffer->data,
                             reply + (buffer_offset - read_offset),
