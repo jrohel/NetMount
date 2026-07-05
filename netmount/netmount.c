@@ -56,6 +56,20 @@ static void * get_offset(const void * func);
 #pragma aux get_offset = parm[bx] modify exact[] value[bx]
 
 
+// Reads a 32-bit value from a far pointer atomically on 16-bit CPUs.
+// On 8088/80286, a uint32_t read requires two 16-bit loads which are not atomic -
+// if the value changes between them, the result is inconsistent.
+// Retries if the high word changes between readings, ensuring a consistent result.
+// Safe when at most one change can occur during the read (e.g. a value modified only by interrupts).
+static uint32_t read_atomic_uint32(volatile const uint32_t __far * ptr);
+#pragma aux read_atomic_uint32 = \
+    "retry:"                     \
+    "mov dx, es:[bx+2]"          \
+    "mov ax, es:[bx]"            \
+    "cmp dx, es:[bx+2]"          \
+    "jne retry" parm[es bx] modify exact[ax dx] value[dx ax];
+
+
 // Defines a variable placed in the code (used for variables placed in the resident part of the code).
 // It also defines access function.
 // name - name of variable
@@ -843,7 +857,7 @@ static void handle_request_for_our_drive(void) {
     volatile uint32_t __far * const time_ptr = (uint32_t __far *)0x46C;
 
     struct file_buffer * const read_buffer = getptr_read_file_buffer();
-    if (read_buffer->valid_bytes > 0 && *time_ptr - read_buffer->timestamp > 5 * 18) {
+    if (read_buffer->valid_bytes > 0 && read_atomic_uint32(time_ptr) - read_buffer->timestamp > 5 * 18) {
         // Keep file_buffer data valid for no more than 5 seconds.
         read_buffer->valid_bytes = 0;
     }
@@ -1030,7 +1044,7 @@ static void handle_request_for_our_drive(void) {
                         read_buffer->start_cluster = sftptr->start_cluster;
                         read_buffer->offset = buffer_offset;
                         read_buffer->valid_bytes = read_offset + len - buffer_offset;
-                        read_buffer->timestamp = *time_ptr;
+                        read_buffer->timestamp = read_atomic_uint32(time_ptr);
                         my_memcpy_ff(
                             read_buffer->data,
                             reply + (buffer_offset - read_offset),
